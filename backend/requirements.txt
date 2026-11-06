@@ -1,0 +1,18 @@
+# Comproof backend
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+psycopg[binary]>=3.2,<4
+tzdata>=2024.1
+# reports and exports
+openpyxl==3.1.5
+reportlab>=4.2,<6
+jinja2>=3.1,<4
+python-docx>=1.1,<2
+# comparison engine
+pypdfium2>=4.30,<6
+pdfplumber>=0.11,<0.12
+pytesseract>=0.3.13,<0.4
+opencv-python-headless>=4.10,<6
+numpy>=2.0,<3
+pillow>=10.4,<13
