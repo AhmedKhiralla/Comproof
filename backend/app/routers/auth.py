@@ -128,18 +128,17 @@ def me_payload(call: Call) -> dict:
             "terminology": effective_terms(t["terminology"]),
             "ai": ai_status(t["features"]),
         }
-        if u["is_tenant_admin"]:
-            sites = tx.q("SELECT id, code, name, country, timezone, active FROM sites WHERE active ORDER BY code")
-            for s in sites:
-                s["roles"] = ["admin"]
-        else:
-            sites = tx.q(
-                "SELECT s.id, s.code, s.name, s.country, s.timezone, s.active,"
-                "       array_to_string(array_agg(r.role ORDER BY r.role), ',') AS role_list"
-                "  FROM sites s JOIN user_site_roles r ON r.site_id = s.id"
-                " WHERE r.user_id = %s AND s.active GROUP BY s.id ORDER BY s.code", u["id"])
-            for s in sites:
-                s["roles"] = s.pop("role_list").split(",")
+        # Administrators see every active site; everyone keeps the roles they actually hold there, so an
+        # administrator who is also an approver can sign (signing rights never come from "admin" alone).
+        sites = tx.q(
+            "SELECT s.id, s.code, s.name, s.country, s.timezone, s.active,"
+            "       coalesce(string_agg(r.role, ',' ORDER BY r.role), '') AS role_list"
+            "  FROM sites s LEFT JOIN user_site_roles r ON r.site_id = s.id AND r.user_id = %s"
+            " WHERE s.active GROUP BY s.id"
+            " HAVING %s OR count(r.role) > 0 ORDER BY s.code", u["id"], bool(u["is_tenant_admin"]))
+        for s in sites:
+            roles = [x for x in s.pop("role_list").split(",") if x]
+            s["roles"] = (["admin"] if u["is_tenant_admin"] else []) + roles
         data["sites"] = sites
     return data
 

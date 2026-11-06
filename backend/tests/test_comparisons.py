@@ -229,3 +229,24 @@ def test_other_company_cannot_see_comparison(acme, two_companies):
     assert st == 404
     st, lst, _ = other.get("/api/comparisons")
     assert st == 200 and lst["items"] == []
+
+
+def test_admin_who_is_also_approver_can_sign_master(server, acme):
+    """A company administrator keeps the site roles they hold, so the app offers them the approval signature."""
+    admin = acme["admin"]
+    st, b, _ = admin.post("/api/users", {"email": "boss@cmpr.test", "full_name": "Boss", "is_tenant_admin": True,
+                                         "roles": [{"site_id": acme["site"]["id"], "role": r}
+                                                   for r in ("artwork_editor", "approver")]})
+    assert st == 200, b
+    boss = sign_in_first_time(server, "boss@cmpr.test", b["temporary_password"], "Boss#Pass2026")
+    st, me, _ = boss.get("/api/auth/me")
+    site = next(s for s in me["sites"] if s["id"] == acme["site"]["id"])
+    assert "admin" in site["roles"] and "approver" in site["roles"], site
+    st, p, _ = boss.post("/api/products", {"code": "BOSS", "name": "Boss product"})
+    st, comp, _ = boss.post(f"/api/products/{p['id']}/components", {"code": "BOSS-PIL", "kind": "leaflet", "name": "PIL"})
+    st, f = boss.upload("/api/files", "boss.pdf", _pdf(APPROVED[:3]))
+    st, c, _ = boss.post(f"/api/components/{comp['id']}/artwork", {"version": "01", "file_id": f["id"]})
+    ver = c["versions"][0]
+    st, c, _ = boss.post(f"/api/artwork/{ver['id']}/sign", {"meaning": "approved_master", "email": "boss@cmpr.test",
+                                                            "password": "Boss#Pass2026"})
+    assert st == 200 and c["versions"][0]["status"] == "effective", c
