@@ -1,14 +1,16 @@
-"""Runs the three audit levels end to end and writes screenshots and a JSON result.
+"""Runs the audit levels end to end and writes screenshots and a JSON result.
 
 Level 1  scientific and internal-consistency audit of the approved text
 Level 2  full-document content comparison, every word, per language
 Level 3  punctuation, spacing, capitalisation and digit style on matching text
+Levels 4-7 (checks.py): colour against shade standards, barcodes, graphics overlay, print checks
 """
 from __future__ import annotations
 
 import dataclasses
 import hashlib
 import json
+import logging
 import os
 import threading
 import time
@@ -18,7 +20,8 @@ from PIL import Image, ImageDraw, ImageOps
 
 from . import ai, compare, ingest, layout, master_checks
 
-ENGINE_VERSION = "2.0.0"
+ENGINE_VERSION = "2.1.0"
+log = logging.getLogger("comproof.engine")
 SEV_ORDER = {"critical": 0, "major": 1, "minor": 2, "info": 3}
 KIND_LABELS = {"leaflet": "patient leaflet / SmPC", "carton": "carton", "label": "label", "sachet": "sachet",
                "blister_foil": "blister foil", "tube": "tube", "other": "packaging text"}
@@ -151,7 +154,10 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                "vision_model": None, "science_model": None, "reading_model": None, "notes": []}
 
     progress("Loading documents")
-    ref, des = ingest.load(ref_path), ingest.load(des_path)
+    spectro_test = des_path.lower().endswith((".cgats", ".cxf"))
+    do_text = settings.get("text", True) and not spectro_test
+    ref = ingest.load(ref_path)
+    des = ingest.Document(name=os.path.basename(des_path), kind="spectro") if spectro_test else ingest.load(des_path)
     if settings.get("mirror_test"):
         for p in des.pages:
             p.image = ImageOps.mirror(p.image)
@@ -163,8 +169,11 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
     if read_p:
         from .ai_read import make_reader
         reader = make_reader(read_p, read_stats, threading.Lock())
-    ref_regions, ref_ex = _analyse(ref, phrases, progress, "Approved", rotated, reader, check)
-    des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check)
+    if do_text:
+        ref_regions, ref_ex = _analyse(ref, phrases, progress, "Approved", rotated, reader, check)
+        des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check)
+    else:
+        ref_regions, ref_ex, des_regions, des_ex = [], [], [], []
     if read_p:
         ai_info["reading_model"] = read_stats.get("model")
         ai_info["tiles_read"] = read_stats.get("tiles", 0)
@@ -174,7 +183,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     findings: list[compare.Finding] = []
     # ---- Level 1: approved text audit
-    if settings.get("step1", True):
+    if do_text and settings.get("step1", True):
         progress("Level 1: auditing the approved text")
         findings = master_checks.run(ref_regions, known_strengths=settings.get("strengths") or [])
         _enrich_step1(findings, ref_regions)
@@ -202,7 +211,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     # ---- Levels 2 and 3, per language
     order = {}
-    for lang in [l for l in ("eng", "ara") if l in languages]:
+    for lang in [l for l in ("eng", "ara") if l in languages and do_text]:
         if ref.plain_text is not None:
             a = compare.tokens_from_text("\n".join(l for l in ref.plain_text.splitlines()
                                                    if compare.is_arabic(l) == (lang == "ara")), lang)
@@ -236,12 +245,60 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                     f.severity = "info"
         check()
 
+    # ---- Levels 4-7: colour, barcodes, graphics, print checks
+    from . import checks as extra
+    chk = settings.get("checks") or {}
+    sections: dict = {}
+    custom: dict = {}
+    n = len(findings) + 1
+    def guarded(name, fn):
+        """A check that cannot run (e.g. the sample does not align with the shade card) is reported, not fatal."""
+        nonlocal n
+        try:
+            fs, sh, sec, n = fn()
+        except Exception as e:  # noqa: BLE001
+            log.warning("check %s could not run: %s", name, e)
+            sections[name] = {"error": str(e)[:400]}
+            findings.append(extra._finding(f"X{n}", {"colour": 4, "barcodes": 5, "graphics": 6, "print": 7}[name],
+                                           "check_error", "minor", f"{name.title()} check could not run",
+                                           section=name.title(), category=name.title(), explanation=str(e)[:400],
+                                           action="Check the files (same artwork, whole page, right way up) and run again."))
+            n += 1
+            return
+        findings.extend(fs)
+        custom.update(sh)
+        sections[name] = sec
+        check()
+
+    if chk.get("colour") and settings.get("_colour"):
+        guarded("colour", lambda: extra.colour_check(chk["colour"], settings["_colour"]["measurement"],
+                                                     settings["_colour"]["std_path"], des_path, n, progress))
+    if des.pages:
+        if chk.get("barcodes"):
+            guarded("barcodes", lambda: (lambda r: (r[0], {}, r[1], r[2]))(
+                extra.barcode_check(ref, des, settings.get("product") or {}, n, progress)))
+        if chk.get("graphics"):
+            guarded("graphics", lambda: extra.graphics_check(ref, des, ref_regions, des_regions, n, progress))
+        if chk.get("text_size") or chk.get("braille") or chk.get("dieline"):
+            guarded("print", lambda: (lambda r: (r[0], {}, r[1], r[2]))(
+                extra.print_check(des, des_regions, des_path, settings, n, progress)))
+
     # ---- screenshots
     progress("Creating screenshots")
     shots = os.path.join(out_dir, "shots")
     os.makedirs(shots, exist_ok=True)
     crops = {}
     for f in findings:
+        if f.id in custom:
+            rc, dc = custom[f.id]
+            crops[f.id] = (rc, dc)
+            f.ref_crop = [0, 0, 0, rc.width, rc.height] if rc is not None else []
+            f.des_crop = [0, 0, 0, dc.width, dc.height] if dc is not None else []
+            if rc is not None:
+                rc.convert("RGB").save(os.path.join(shots, f"{f.id}_approved.jpg"), quality=90)
+            if dc is not None:
+                dc.convert("RGB").save(os.path.join(shots, f"{f.id}_design.jpg"), quality=90)
+            continue
         rc, f.ref_crop = crop(ref, f.ref_loc, f.ref_hl, f.ref_anchor, PROOF_RED)
         dc, f.des_crop = crop(des, f.des_loc, f.des_hl, f.des_anchor, PROOF_BLUE if f.step != 1 else PROOF_RED)
         crops[f.id] = (rc, dc)
@@ -299,7 +356,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                      "sizes": [p.image.size for p in ref.pages]},
         "design": {"name": des.name, "kind": des.kind, "pages": len(des.pages), "sha256": sha256(des_path),
                    "sizes": [p.image.size for p in des.pages]},
-        "settings": {k: v for k, v in settings.items() if k != "ai"} | {"rotated_text_used": rotated},
+        "settings": {k: v for k, v in settings.items() if k != "ai" and not k.startswith("_")} | {"rotated_text_used": rotated},
+        "checks": sections,
         "reading_order": order,
         "ai": ai_info,
         "exclusions": [dataclasses.asdict(e) | {"doc": "approved"} for e in ref_ex]

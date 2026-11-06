@@ -11,12 +11,13 @@ import { useI18n } from "../lib/i18n";
 import { Link, navigate } from "../lib/router";
 import { usePerms } from "../lib/session";
 import type { StringKey } from "../lib/strings";
+import { ShadeSection, type ShadeSet } from "./Shades";
 
 export const KINDS = ["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"] as const;
 
 interface ProductRow {
   id: string; code: string; name: string; name_ar: string | null; generic_name: string | null; strengths: string | null;
-  dosage_form: string | null; registration_no: string | null; markets: string[]; active: boolean;
+  dosage_form: string | null; registration_no: string | null; markets: string[]; active: boolean; gtin: string | null;
   component_count: number; effective_count: number;
 }
 interface ComponentRow {
@@ -31,7 +32,7 @@ interface Version {
   sha256: string; page_count: number | null; doc_kind: string; size_bytes: number; created_at: string; created_by_name: string | null;
   signatures: Signature[];
 }
-interface ComponentDetail extends ComponentRow { product_id: string; product_code: string; product_name: string; versions: Version[]; can_edit: boolean; }
+interface ComponentDetail extends ComponentRow { product_id: string; product_code: string; product_name: string; versions: Version[]; can_edit: boolean; shade_sets: ShadeSet[]; }
 
 // ------------------------------------------------------------------ products
 function ProductSheet({ product, onClose, onSaved }: { product: ProductRow | null; onClose: () => void; onSaved: (id: string) => void }) {
@@ -40,7 +41,7 @@ function ProductSheet({ product, onClose, onSaved }: { product: ProductRow | nul
   const [f, setF] = useState({
     code: product?.code ?? "", name: product?.name ?? "", name_ar: product?.name_ar ?? "", generic_name: product?.generic_name ?? "",
     strengths: product?.strengths ?? "", dosage_form: product?.dosage_form ?? "", registration_no: product?.registration_no ?? "",
-    markets: (product?.markets ?? ["EG"]).join(", "), active: product?.active ?? true,
+    markets: (product?.markets ?? ["EG"]).join(", "), active: product?.active ?? true, gtin: product?.gtin ?? "",
   });
   const [busy, setBusy] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -49,7 +50,7 @@ function ProductSheet({ product, onClose, onSaved }: { product: ProductRow | nul
   const submit = async () => {
     setBusy(true); setErrs({}); setGeneral(null);
     const body = { name: f.name, name_ar: f.name_ar, generic_name: f.generic_name, strengths: f.strengths, dosage_form: f.dosage_form,
-      registration_no: f.registration_no, markets: f.markets.split(/[\s,;]+/).filter(Boolean) };
+      registration_no: f.registration_no, markets: f.markets.split(/[\s,;]+/).filter(Boolean), gtin: f.gtin.trim() };
     try {
       const r = product ? await patch<ProductRow>(`/api/products/${product.id}`, { ...body, active: f.active })
         : await post<ProductRow>("/api/products", { ...body, code: f.code });
@@ -72,6 +73,7 @@ function ProductSheet({ product, onClose, onSaved }: { product: ProductRow | nul
         <TextField label={t("lib.product.regNo")} value={f.registration_no} onChange={set("registration_no")} dir="ltr" />
         <TextField label={t("lib.product.markets")} value={f.markets} onChange={set("markets")} dir="ltr" hint={t("lib.product.marketsHint")} error={errs.markets} />
       </div>
+      <TextField label={t("lib.product.gtin")} value={f.gtin} onChange={set("gtin")} dir="ltr" hint={t("lib.product.gtinHint")} error={errs.gtin} />
       {product && <div className="feature" style={{ border: 0, padding: "4px 0" }}>
         <div className="text"><strong>{t("common.active")}</strong><span>{t("lib.product.activeHint")}</span></div>
         <Switch label={t("common.active")} checked={f.active} onChange={(v) => setF((s) => ({ ...s, active: v }))} />
@@ -205,6 +207,7 @@ export function ProductPage({ productId }: { productId: string }) {
         <div><dt>{t("common.code")}</dt><dd className="mono-id">{data.code}</dd></div>
         {data.name_ar && <div><dt>{t("lib.product.nameAr")}</dt><dd dir="rtl">{data.name_ar}</dd></div>}
         <div><dt>{t("lib.product.regNo")}</dt><dd>{data.registration_no ?? "—"}</dd></div>
+        <div><dt>{t("lib.product.gtin")}</dt><dd className="mono-id">{data.gtin ?? "—"}</dd></div>
         <div><dt>{t("lib.product.markets")}</dt><dd>{data.markets.map((m) => countryName(m)).join(", ") || "—"}</dd></div>
         <div><dt>{t("common.status")}</dt><dd>{data.active ? t("common.active") : t("common.inactive")}</dd></div>
       </dl>
@@ -335,6 +338,7 @@ export function ComponentPage({ componentId }: { componentId: string }) {
           </ul>
         )}
       </section>
+      <ShadeSection component={data} onChanged={(c) => setData(c)} />
       {edit && <ComponentSheet productId={data.product_id} component={data} onClose={() => setEdit(false)} onSaved={() => reload()} />}
       {addVer && <VersionSheet component={data} onClose={() => setAddVer(false)} onSaved={(c) => { setData(c); toast(t("lib.ver.registered.toast")); }} />}
       {signing && <SignDialog meaning={signing.meaning} label={`${data.code} v${signing.v.version} · ${signing.v.filename}`}

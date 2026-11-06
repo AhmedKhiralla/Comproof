@@ -87,6 +87,7 @@ class ProductIn(BaseModel):
     dosage_form: str | None = Field(default=None, max_length=120)
     registration_no: str | None = Field(default=None, max_length=80)
     markets: list[str] = Field(default_factory=list, max_length=60)
+    gtin: str | None = Field(default=None, pattern=r"^\s*([0-9]{8,14})?\s*$")
     _c = field_validator("code")(_code)
 
     _m = field_validator("markets")(lambda v: _markets(v))
@@ -100,6 +101,7 @@ class ProductPatch(BaseModel):
     dosage_form: str | None = Field(default=None, max_length=120)
     registration_no: str | None = Field(default=None, max_length=80)
     markets: list[str] | None = None
+    gtin: str | None = Field(default=None, pattern=r"^\s*([0-9]{8,14})?\s*$")
     active: bool | None = None
 
 
@@ -131,10 +133,10 @@ def create_product(call: Call):
     if call.tx.val("SELECT 1 FROM products WHERE code = %s", b.code):
         raise ApiError(409, "duplicate", "Some fields need attention.", fields={"code": "This code is already used."})
     row = call.tx.one(
-        "INSERT INTO products (tenant_id, code, name, name_ar, generic_name, strengths, dosage_form, registration_no, markets)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        "INSERT INTO products (tenant_id, code, name, name_ar, generic_name, strengths, dosage_form, registration_no,"
+        " markets, gtin) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
         call.tenant_id, b.code, b.name.strip(), _opt(b.name_ar), _opt(b.generic_name), _opt(b.strengths),
-        _opt(b.dosage_form), _opt(b.registration_no), b.markets)
+        _opt(b.dosage_form), _opt(b.registration_no), b.markets, _opt(b.gtin))
     return _product(call, row["id"])
 
 
@@ -148,7 +150,7 @@ def update_product(call: Call):
     pid = call.path["product_id"]
     _product(call, pid)
     b: ProductPatch = call.body
-    for col in ("name", "name_ar", "generic_name", "strengths", "dosage_form", "registration_no", "active"):
+    for col in ("name", "name_ar", "generic_name", "strengths", "dosage_form", "registration_no", "gtin", "active"):
         val = getattr(b, col)
         if val is not None:
             call.tx.x(f"UPDATE products SET {col} = %s WHERE id = %s::uuid", val if col == "active" else _opt(val), pid)
@@ -249,6 +251,11 @@ def _component(call: Call, cid) -> dict:
     for v in versions:
         v["signatures"] = esign.list_for(call, "artwork_version", str(v["id"]))
     c["versions"] = versions
+    shades = call.tx.q(SHADE_SQL + " WHERE s.component_id = %s::uuid ORDER BY s.created_at DESC", str(cid))
+    for sh in shades:
+        sh["signatures"] = esign.list_for(call, "shade_set", str(sh["id"]))
+        sh["measurement"] = _public_measurement(sh["measurement"])
+    c["shade_sets"] = shades
     c["can_edit"] = can_edit_library(call)
     return c
 
@@ -263,9 +270,11 @@ def list_components(call: Call):
     """Flat list for pickers: active components with their effective artwork."""
     return {"items": call.tx.q(
         "SELECT c.id, c.code, c.kind, c.name, c.languages, p.id AS product_id, p.code AS product_code, p.name AS product_name,"
-        "       a.id AS artwork_id, a.version AS artwork_version, a.file_id AS artwork_file_id, f.filename AS artwork_filename"
+        "       a.id AS artwork_id, a.version AS artwork_version, a.file_id AS artwork_file_id, f.filename AS artwork_filename,"
+        "       sh.id AS shade_set_id, sh.version AS shade_version, sh.source AS shade_source"
         "  FROM components c JOIN products p ON p.id = c.product_id"
         "  LEFT JOIN artwork_versions a ON a.component_id = c.id AND a.status = 'effective'"
+        "  LEFT JOIN shade_sets sh ON sh.component_id = c.id AND sh.status = 'effective'"
         "  LEFT JOIN files f ON f.id = a.file_id"
         " WHERE c.active AND p.active ORDER BY p.code, c.kind, c.code")}
 
@@ -330,3 +339,166 @@ def sign_artwork(call: Call):
     else:
         call.tx.x("UPDATE artwork_versions SET status = 'withdrawn' WHERE id = %s", a["id"])
     return _component(call, a["component_id"])
+
+
+
+# ------------------------------------------------------------------ shade sets (colour references)
+SHADE_SQL = """
+SELECT s.*, u.full_name AS created_by_name,
+       fs.filename AS standard_filename, fl.filename AS light_filename, fd.filename AS dark_filename
+  FROM shade_sets s JOIN files fs ON fs.id = s.standard_file_id JOIN files fl ON fl.id = s.light_file_id
+  JOIN files fd ON fd.id = s.dark_file_id LEFT JOIN users u ON u.id = s.created_by
+"""
+
+
+def _public_measurement(m: dict) -> dict:
+    """The measurement without the sample point lists (large and of no use to the browser)."""
+    m = dict(m or {})
+    m["inks"] = [{k: v for k, v in i.items() if k != "points"} for i in m.get("inks", [])]
+    return m
+
+
+def shade_dir(tenant_id: str, shade_id: str) -> str:
+    import os
+    return os.path.join(storage.root(), "tenants", str(tenant_id), "shades", str(shade_id))
+
+
+def measurement_sha(m: dict) -> str:
+    import hashlib
+    import json
+    return hashlib.sha256(json.dumps(m, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+
+class ShadeIn(BaseModel):
+    version: str = Field(pattern=r"^[A-Za-z0-9._-]{1,20}$")
+    source: Literal["scan_target", "scan", "spectro", "photo"]
+    standard_file_id: str
+    light_file_id: str
+    dark_file_id: str
+    supplier: str | None = Field(default=None, max_length=120)
+    reference_no: str | None = Field(default=None, max_length=80)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+@endpoint(auth="tenant_user", body=ShadeIn)
+def create_shade_set(call: Call):
+    """Measure the three shade cards, verify Light > Standard > Dark per ink, and register a draft reference."""
+    import hashlib
+    import json
+    import os
+    import uuid
+    from ..engine import colour
+    require_library_edit(call)
+    cid = call.path["component_id"]
+    _component(call, cid)
+    b: ShadeIn = call.body
+    ids = {"standard": b.standard_file_id, "light": b.light_file_id, "dark": b.dark_file_id}
+    if len(set(ids.values())) < 3:
+        raise ApiError(422, "invalid", "Some fields need attention.",
+                       fields={"light_file_id": "Standard, Light and Dark must be three different files."})
+    if call.tx.val("SELECT 1 FROM shade_sets WHERE component_id = %s::uuid AND version = %s", cid, b.version):
+        raise ApiError(409, "duplicate", "Some fields need attention.", fields={"version": "This version already exists."})
+    paths, kinds = {}, {}
+    for tag, fid in ids.items():
+        f = call.tx.one("SELECT storage_key, sha256, doc_kind FROM files WHERE id = %s::uuid", fid)
+        if not f:
+            raise ApiError(422, "invalid", "Some fields need attention.", fields={f"{tag}_file_id": "Upload this file."})
+        try:
+            paths[tag] = storage.verify(f["storage_key"], f["sha256"])
+        except storage.StorageError as e:
+            raise ApiError(409, "integrity", str(e))
+        kinds[tag] = f["doc_kind"]
+    spectro = None
+    if b.source == "spectro":
+        if any(k != "spectro" for k in kinds.values()):
+            raise ApiError(422, "invalid", "Some fields need attention.",
+                           fields={"source": "Upload three spectrophotometer files (CxF or CGATS) for this source."})
+        spectro = {}
+        for tag, p in paths.items():
+            with open(p, "rb") as fh:
+                spectro[tag] = colour.parse_spectro(fh.read())
+    elif any(k == "spectro" for k in kinds.values()):
+        raise ApiError(422, "invalid", "Some fields need attention.",
+                       fields={"source": "These are measurement files: choose “Spectrophotometer” as the source."})
+    try:
+        m = colour.analyse_set(b.source, paths.get("standard"), paths.get("light"), paths.get("dark"), spectro)
+    except colour.ColourError as e:
+        raise ApiError(422, "colour", str(e))
+    images = m.pop("_images", None)
+    sid = str(uuid.uuid4())
+    if images:
+        d = shade_dir(call.tenant_id, sid)
+        os.makedirs(d, exist_ok=True)
+        m["previews"] = {}
+        for tag, img in images.items():
+            data = colour.to_jpeg(colour.outline_inks(img, m["inks"]))
+            with open(os.path.join(d, f"{tag}.jpg"), "wb") as fh:
+                fh.write(data)
+            m["previews"][tag] = hashlib.sha256(data).hexdigest()
+    m["files"] = {tag: call.tx.val("SELECT sha256 FROM files WHERE id = %s::uuid", fid) for tag, fid in ids.items()}
+    sha = measurement_sha(m)
+    call.tx.x("INSERT INTO shade_sets (id, tenant_id, component_id, version, source, standard_file_id, light_file_id,"
+              " dark_file_id, measurement, measurement_sha256, verification, supplier, reference_no, notes)"
+              " VALUES (%s::uuid, %s, %s::uuid, %s, %s, %s::uuid, %s::uuid, %s::uuid, %s::jsonb, %s, %s, %s, %s, %s)",
+              sid, call.tenant_id, cid, b.version, b.source, b.standard_file_id, b.light_file_id, b.dark_file_id,
+              json.dumps(m, ensure_ascii=False), sha, m["verification"], _opt(b.supplier), _opt(b.reference_no),
+              _opt(b.notes))
+    return _component(call, cid)
+
+
+@endpoint(auth="tenant_user")
+def shade_preview(call: Call):
+    import os
+    which = call.path["which"]
+    if which not in ("standard", "light", "dark"):
+        raise not_found("Preview")
+    s = call.tx.one("SELECT id, tenant_id, measurement FROM shade_sets WHERE id = %s::uuid", call.path["shade_id"])
+    if not s:
+        raise not_found("Shade set")
+    want = (s["measurement"].get("previews") or {}).get(which)
+    p = os.path.join(shade_dir(s["tenant_id"], s["id"]), f"{which}.jpg")
+    if not want or not os.path.exists(p):
+        raise not_found("Preview")
+    import hashlib
+    with open(p, "rb") as fh:
+        if hashlib.sha256(fh.read()).hexdigest() != want:
+            raise ApiError(409, "integrity", "The preview no longer matches its recorded SHA-256.")
+    return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
+class ShadeSignIn(BaseModel):
+    meaning: Literal["approved_master", "withdrawn"]
+    email: str = Field(min_length=3, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+@endpoint(auth="tenant_user", body=ShadeSignIn)
+def sign_shade_set(call: Call):
+    b: ShadeSignIn = call.body
+    require_signer(call, "approver")
+    s = call.tx.one(SHADE_SQL + " WHERE s.id = %s::uuid", call.path["shade_id"])
+    if not s:
+        raise not_found("Shade set")
+    comp = call.tx.one("SELECT code FROM components WHERE id = %s", s["component_id"])
+    label = f"{comp['code']} shades {s['version']}"
+    if b.meaning == "approved_master":
+        if s["status"] != "draft":
+            raise ApiError(409, "not_draft", "Only a draft shade set can be approved as the reference.")
+        if s["verification"] == "fail":
+            raise ApiError(409, "verification_failed", "This shade set failed the Light / Standard / Dark check and "
+                           "cannot be approved. Check the card labels and register the scans again.")
+    else:
+        if s["status"] not in ("draft", "effective"):
+            raise ApiError(409, "closed", "This shade set is already closed.")
+        if not (b.reason or "").strip():
+            raise ApiError(422, "invalid", "Some fields need attention.", fields={"reason": "Give the reason for withdrawal."})
+    esign.sign(call, entity="shade_set", record_id=str(s["id"]), label=label, meaning=b.meaning,
+               record_hash=s["measurement_sha256"], email=b.email, password=b.password, reason=b.reason)
+    if b.meaning == "approved_master":
+        call.tx.x("UPDATE shade_sets SET status = 'superseded' WHERE component_id = %s AND status = 'effective'",
+                  s["component_id"])
+        call.tx.x("UPDATE shade_sets SET status = 'effective' WHERE id = %s", s["id"])
+    else:
+        call.tx.x("UPDATE shade_sets SET status = 'withdrawn' WHERE id = %s", s["id"])
+    return _component(call, s["component_id"])

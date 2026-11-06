@@ -6,6 +6,13 @@ FEATURES: dict[str, dict] = {
     # Audit levels
     "step1_master_audit": {"group": "levels", "default": True},   # scientific / consistency audit of the approved text
     "step3_typography":   {"group": "levels", "default": True},   # punctuation, spacing, case, digit style
+    # Checks beyond the text
+    "check_colour":       {"group": "checks", "default": True},   # ΔE against the approved Standard / Light / Dark shades
+    "check_barcodes":     {"group": "checks", "default": True},   # decode, validate and compare barcodes
+    "check_graphics":     {"group": "checks", "default": True},   # overlay: missing, added or changed graphic elements
+    "check_text_size":    {"group": "checks", "default": True},   # minimum text size per packaging type
+    "check_braille":      {"group": "checks", "default": True},   # read Braille and compare with the product name
+    "check_dieline":      {"group": "checks", "default": True},   # text across folds or too close to cut edges
     # Review rules (21 CFR Part 11 procedural controls)
     "four_eyes":          {"group": "review", "default": True},   # the approver must not be the person who reviewed
     "all_decided":        {"group": "review", "default": True},   # every finding needs a decision before approval
@@ -30,6 +37,14 @@ ENGINE_DEFAULTS: dict = {
     "reading_provider": None,     # provider for reading scans; None = same as provider
     "exclude_phrases": [],        # extra administrative text to ignore, one phrase per entry
     "rotated_text": "auto",       # leaflets: ignore rotated print-house strips; other packaging: read them
+    # colour
+    "colour_tolerance": 2.0,      # ΔE: how far a sample may be from the Dark-Standard-Light range
+    "flat_tolerance": 3.0,        # ΔE00 to the Standard for inks whose Light and Dark do not differ
+    # print checks
+    "min_font_pt": {"leaflet": 9.0, "carton": 7.0, "label": 7.0, "sachet": 7.0, "blister_foil": 7.0, "tube": 7.0,
+                    "other": 7.0},
+    "braille_required": [],       # packaging types that must carry Braille (e.g. ["carton"] for EU markets)
+    "cut_margin_mm": 1.5,         # minimum distance from text to a cut edge
 }
 
 

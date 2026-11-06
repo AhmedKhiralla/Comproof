@@ -94,7 +94,9 @@ export function Comparisons() {
 interface ComponentPick {
   id: string; code: string; kind: string; name: string; languages: string[]; product_code: string; product_name: string;
   artwork_id: string | null; artwork_version: string | null; artwork_filename: string | null;
+  shade_set_id: string | null; shade_version: string | null; shade_source: string | null;
 }
+const CHECKS = ["colour", "barcodes", "graphics", "text_size", "braille", "dieline"] as const;
 
 export function NewComparison() {
   const { t } = useI18n();
@@ -106,8 +108,11 @@ export function NewComparison() {
   const [f, setF] = useState({
     site_id: sites.find((s) => s.id === siteId)?.id ?? sites[0]?.id ?? "", component_id: preset, title: "",
     purpose: "proof", kind: "leaflet", supplier: "", reference_no: "", eng: true, ara: true, step1: true, step3: true,
-    mirror: false, rotated: "", aiRead: !!me?.tenant?.ai.read,
+    mirror: false, rotated: "", aiRead: !!me?.tenant?.ai.read, text: true, sample_source: "scan",
   });
+  const feat = me?.tenant?.features ?? {};
+  const [checks, setChecks] = useState<Record<(typeof CHECKS)[number], boolean>>(
+    () => Object.fromEntries(CHECKS.map((k) => [k, feat[`check_${k}`] !== false])) as Record<(typeof CHECKS)[number], boolean>);
   const [ref, setRef] = useState<UploadedFile | null>(null);
   const [customRef, setCustomRef] = useState(false);
   const [test, setTest] = useState<UploadedFile | null>(null);
@@ -120,6 +125,8 @@ export function NewComparison() {
       title: s.title || `${comp.product_name} · ${comp.name}`, mirror: comp.kind === "blister_foil" ? s.mirror : false }));
   }, [comp]);
   const useMaster = !!comp?.artwork_id && !customRef;
+  const spectroTest = test?.doc_kind === "spectro";
+  const textOn = f.text && !spectroTest;
   const submit = async () => {
     setBusy(true); setErrs({}); setGeneral(null);
     try {
@@ -127,7 +134,8 @@ export function NewComparison() {
         site_id: f.site_id, title: f.title, purpose: f.purpose, component_id: f.component_id || null,
         reference_file_id: useMaster ? null : ref?.id ?? null, test_file_id: test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
         kind: f.kind || null, languages: [f.eng && "eng", f.ara && "ara"].filter(Boolean), step1: f.step1, step3: f.step3,
-        mirror_test: f.mirror, rotated_text: f.rotated || null, ai_read: f.aiRead,
+        mirror_test: f.mirror, rotated_text: f.rotated || null, ai_read: f.aiRead, text: textOn,
+        ...checks, sample_source: spectroTest ? "spectro" : f.sample_source,
       });
       navigate(`/comparisons/${r.id}`);
     } catch (e) { setErrs(fieldErrors(e)); setGeneral(errorText(e, t)); setBusy(false); }
@@ -192,12 +200,16 @@ export function NewComparison() {
                 <label className="row small"><input type="checkbox" checked={f.eng} onChange={(e) => setF({ ...f, eng: e.target.checked })} />{t("common.english")}</label>
                 <label className="row small"><input type="checkbox" checked={f.ara} onChange={(e) => setF({ ...f, ara: e.target.checked })} />{t("common.arabic")}</label>
               </div></div>
+            <div className="feature"><div className="text"><strong>{t("new.text")}</strong><span>{t(spectroTest ? "new.textSpectro" : "new.textHint")}</span></div>
+              <Switch label={t("new.text")} checked={textOn} disabled={spectroTest} onChange={(v) => setF({ ...f, text: v })} /></div>
+            {textOn && <>
             <div className="feature"><div className="text"><strong>{t("level.1")}</strong><span>{t("level.1.d")}</span></div>
               <Switch label={t("level.1")} checked={f.step1} onChange={(v) => setF({ ...f, step1: v })} /></div>
             <div className="feature"><div className="text"><strong>{t("level.2")}</strong><span>{t("level.2.d")}</span></div>
               <span className="small muted">{t("new.always")}</span></div>
             <div className="feature"><div className="text"><strong>{t("level.3")}</strong><span>{t("level.3.d")}</span></div>
               <Switch label={t("level.3")} checked={f.step3} onChange={(v) => setF({ ...f, step3: v })} /></div>
+            </>}
             {me?.tenant?.ai.read && <div className="feature"><div className="text"><strong>{t("new.aiRead")}</strong><span>{t("new.aiReadHint")}</span></div>
               <Switch label={t("new.aiRead")} checked={f.aiRead} onChange={(v) => setF({ ...f, aiRead: v })} /></div>}
             {(f.kind === "blister_foil" || f.kind === "tube") && <div className="feature"><div className="text"><strong>{t("new.mirror")}</strong><span>{t("new.mirrorHint")}</span></div>
@@ -210,8 +222,32 @@ export function NewComparison() {
               </select></div>
           </div>
         </section>
+
+        <section className="panel">
+          <div className="panel-head"><h2>{t("new.checks")}</h2></div>
+          <div className="panel-body">
+            {CHECKS.filter((k) => feat[`check_${k}`] !== false && (k === "colour" || textOn)).map((k) => (
+              <div className="feature" key={k}>
+                <div className="text"><strong>{t(`check.${k}` as StringKey)}</strong>
+                  <span>{k === "colour"
+                    ? (comp?.shade_set_id ? t("new.colourWith", { v: comp.shade_version ?? "", src: t(`shade.source.${comp.shade_source}` as StringKey) })
+                      : t("new.colourNone"))
+                    : t(`check.${k}.d` as StringKey)}</span></div>
+                <Switch label={t(`check.${k}` as StringKey)} checked={checks[k] && (k !== "colour" || !!comp?.shade_set_id)}
+                  disabled={k === "colour" && !comp?.shade_set_id} onChange={(v) => setChecks((c) => ({ ...c, [k]: v }))} />
+              </div>
+            ))}
+            {checks.colour && comp?.shade_set_id && !spectroTest && comp.shade_source !== "spectro" && (
+              <div className="feature"><div className="text"><strong>{t("new.sampleSource")}</strong><span>{t("new.sampleSourceHint")}</span></div>
+                <select className="select" style={{ maxWidth: 260 }} value={f.sample_source} aria-label={t("new.sampleSource")}
+                  onChange={(e) => setF({ ...f, sample_source: e.target.value })}>
+                  {(["scan", "scan_target", "photo"] as const).map((s2) => <option key={s2} value={s2}>{t(`shade.source.${s2}` as StringKey)}</option>)}
+                </select></div>
+            )}
+          </div>
+        </section>
         <div className="row">
-          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={!test || (!useMaster && !ref) || !f.title || (!f.eng && !f.ara)}>{t("new.start")}</Button>
+          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={!test || (!useMaster && !ref) || !f.title || (textOn && !f.eng && !f.ara)}>{t("new.start")}</Button>
           <Button variant="ghost" onClick={() => history.back()}>{t("common.cancel")}</Button>
         </div>
       </form>

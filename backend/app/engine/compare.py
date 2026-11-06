@@ -67,6 +67,7 @@ class Finding:
     ref_crop: list = field(default_factory=list)        # [page, x0, y0, x1, y1] of the screenshot
     des_crop: list = field(default_factory=list)
     read_conf: int = 100          # mean reading confidence of the words involved (OCR 0-100; text layer 100)
+    data: dict = field(default_factory=dict)   # structured values for checks beyond the text (colour, barcodes...)
 
 
 # ---------------------------------------------------------------- normalisation

@@ -69,6 +69,20 @@ def _summary(res: dict) -> dict:
     return out
 
 
+def _load_shades(tenant: str, cfg: dict) -> dict:
+    """The approved shade set, checked against the SHA-256 that was signed and recorded with the comparison."""
+    from .routers.library import measurement_sha
+    with db.transaction(_ctx(tenant)) as tx:
+        s = tx.one("SELECT s.measurement, s.measurement_sha256, s.source, f.storage_key, f.sha256 FROM shade_sets s"
+                   " JOIN files f ON f.id = s.standard_file_id WHERE s.id = %s::uuid", cfg["shade_set_id"])
+    if not s:
+        raise RuntimeError("The shade set of this comparison was not found.")
+    if s["measurement_sha256"] != cfg["measurement_sha256"] or measurement_sha(s["measurement"]) != s["measurement_sha256"]:
+        raise RuntimeError("The shade set measurement no longer matches its signed SHA-256.")
+    std_path = storage.verify(s["storage_key"], s["sha256"]) if s["source"] != "spectro" else None
+    return {"measurement": s["measurement"], "std_path": std_path}
+
+
 def run_one(c: dict) -> None:
     from .engine import pipeline
     tenant = str(c["tenant_id"])
@@ -77,7 +91,11 @@ def run_one(c: dict) -> None:
     try:
         ref = storage.verify(c["ref_key"], c["ref_sha"])
         test = storage.verify(c["test_key"], c["test_sha"])
-        res = pipeline.run(ref, test, out_dir, c["settings"], progress=lambda m: _progress(c, m))
+        run_settings = dict(c["settings"])
+        colour_cfg = (run_settings.get("checks") or {}).get("colour")
+        if colour_cfg:
+            run_settings["_colour"] = _load_shades(tenant, colour_cfg)
+        res = pipeline.run(ref, test, out_dir, run_settings, progress=lambda m: _progress(c, m))
         with open(os.path.join(out_dir, "result.json"), "rb") as fh:
             sha = hashlib.sha256(fh.read()).hexdigest()
         summary = _summary(res)

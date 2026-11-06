@@ -8,13 +8,14 @@ import { SignDialog, StatusBadge, fileSize, type CompStatus, type Meaning } from
 import { Badge, Button, Empty, LoadError, Menu, MenuItem, Notice, errorText, useLoad, useToast } from "../components/ui";
 import { get, post } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { Swatch } from "./Shades";
 import { Link } from "../lib/router";
 import type { StringKey } from "../lib/strings";
 
 type Sev = "critical" | "major" | "minor" | "info";
 type Loc = [number, number[]];
 interface Finding {
-  id: string; step: 1 | 2 | 3; lang: "eng" | "ara"; kind: string; severity: Sev; title: string; ref_text: string; des_text: string;
+  id: string; step: number; lang: "eng" | "ara"; kind: string; severity: Sev; title: string; ref_text: string; des_text: string;
   ref_loc: Loc[]; des_loc: Loc[]; ref_hl: Loc[]; des_hl: Loc[]; ref_anchor: Loc[]; des_anchor: Loc[];
   ai: { verdict?: string; approved_reads?: string; design_reads?: string; explanation?: string; model?: string } | null;
   note: string; section: string; category: string; segments: [string, string][]; context_before: string; context_after: string;
@@ -27,7 +28,17 @@ interface Result {
   ai: { vision_model: string | null; science_model: string | null; reading_model: string | null; notes: string[] };
   reading_order: Record<string, { similarity: number; approved_words: number; design_words: number }>;
   screenshots: Record<string, string>; seconds: number;
+  settings?: { text?: boolean };
+  checks?: { colour?: ColourRes; barcodes?: BarcodeRes; graphics?: { differences: number; notes: string[] }; print?: PrintRes };
 }
+type Lab = { L: number; a: number; b: number };
+interface ColourRow { id: string; name: string; status: string; standard: Lab; light: Lab; dark: Lab; sample: Lab | null; verdict: string;
+  de_standard?: number; de_light?: number; de_dark?: number; position?: number; off_path?: number; where?: string; reason?: string }
+interface ColourRes { verdict: string; confidence: string; set_confidence: string; tolerance: number; flat_tolerance: number; inks: ColourRow[] }
+interface BarcodeRes { decoders: string[]; approved: number; test: number;
+  rows: { symbology: string; approved: string | null; test: string | null; gtin: string | null; status: string }[] }
+interface PrintRes { text_size?: { limit_pt: number; measured: string; median_pt: number | null; smallest_pt: number | null; lines: number };
+  braille?: { found: { text: string; page: number }[]; expected: string; required: boolean }; dieline?: { found: boolean; folds?: number; cuts?: number } }
 interface Decision { decision: "confirmed" | "not_deviation"; comment: string | null; user_name: string; decided_at: string; }
 interface Sig { id: number; meaning: string; statement: string; reason: string | null; user_id: string; user_name: string; signed_at: string; record_hash: string; }
 interface Detail {
@@ -150,8 +161,11 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
       </button>
       {open && (
         <div className="rep-body">
-          {(f.segments?.length || f.ref_text) ? (two ? <DiffText f={f} /> : <div className={`rep-diff ${isAr(f.ref_text) ? "ar" : ""}`} dir="auto">{f.ref_text}</div>) : null}
-          {two && <div className="rep-key"><span><del>{t("rep.keyDel")}</del></span><span><ins>{t("rep.keyIns")}</ins></span>{f.kind === "missing" && <span>‸ {t("rep.keyCaret")}</span>}</div>}
+          {f.step >= 4 ? ((f.ref_text || f.des_text) ? <div className="rep-diff plain" dir="auto">
+              {f.ref_text && <div><span className="c">{t("rep.approved")}:</span> {f.ref_text}</div>}
+              {f.des_text && <div><span className="c">{t("rep.test")}:</span> {f.des_text}</div>}</div> : null)
+            : (f.segments?.length || f.ref_text) ? (two ? <DiffText f={f} /> : <div className={`rep-diff ${isAr(f.ref_text) ? "ar" : ""}`} dir="auto">{f.ref_text}</div>) : null}
+          {two && f.step < 4 && <div className="rep-key"><span><del>{t("rep.keyDel")}</del></span><span><ins>{t("rep.keyIns")}</ins></span>{f.kind === "missing" && <span>‸ {t("rep.keyCaret")}</span>}</div>}
           <div className={`rep-shots ${two ? "" : "one"}`}>
             <Shot cid={cid} f={f} side="approved" onOpen={onView} />
             {two && <Shot cid={cid} f={f} side="design" onOpen={onView} />}
@@ -274,7 +288,17 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
   const toast = useToast();
   const res = d.result!;
   const F = res.findings;
-  const [step, setStep] = useState<1 | 2 | 3 | "x">(() => (F.some((f) => f.step === 2 && f.severity !== "info") ? 2 : 1));
+  const steps = useMemo(() => {
+    const ks = new Set<number>(res.settings?.text === false ? [] : [1, 2, 3]);
+    F.forEach((f) => ks.add(f.step));
+    const c = res.checks ?? {};
+    if (c.colour) ks.add(4); if (c.barcodes) ks.add(5); if (c.graphics) ks.add(6); if (c.print) ks.add(7);
+    return [...ks].sort();
+  }, [F, res]);
+  const [step, setStep] = useState<number | "x">(() => {
+    const first = steps.find((s) => F.some((f) => f.step === s && f.severity !== "info"));
+    return F.some((f) => f.step === 2 && f.severity !== "info") ? 2 : first ?? steps[0] ?? 1;
+  });
   const [sec, setSec] = useState("");
   const [lang, setLang] = useState<"" | "eng" | "ara">("");
   const [pending, setPending] = useState(false);
@@ -343,7 +367,7 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
     setD(await post<Detail>(`/api/comparisons/${d.id}/sign`, b));
     toast(t("sign.done"));
   };
-  const stepLabel = (s: 1 | 2 | 3) => t(`level.${s}` as StringKey);
+  const stepLabel = (s: number) => t(`level.${s}` as StringKey);
 
   return (
     <>
@@ -402,7 +426,7 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
       <div className="rep-grid">
         <aside className="rep-rail">
           <nav className="rep-steps" aria-label={t("rep.levels")}>
-            {([1, 2, 3] as const).map((s) => (
+            {steps.map((s) => (
               <button key={s} type="button" className={step === s ? "on" : ""} aria-current={step === s}
                 onClick={() => { setStep(s); setSec(""); setActive(null); }}>
                 {stepLabel(s)}<span className="n">{F.filter((f) => f.step === s && f.severity !== "info").length}</span>
@@ -439,6 +463,10 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
               </table>
             </div>
           ) : <>
+            {step === 4 && res.checks?.colour && <ColourPanel c={res.checks.colour} />}
+            {step === 5 && res.checks?.barcodes && <BarcodePanel b={res.checks.barcodes} />}
+            {step === 6 && res.checks?.graphics?.notes?.length ? <Notice tone="warn">{res.checks.graphics.notes.join(" ")}</Notice> : null}
+            {step === 7 && res.checks?.print && <PrintPanel p={res.checks.print} />}
             <div className="rep-tools">
               <input id="rep-q" className="input grow" type="search" placeholder={t("rep.search")} aria-label={t("rep.search")} value={q} onChange={(e) => setQ(e.target.value)} />
               <button type="button" className="chip" aria-pressed={lang === "eng"} onClick={() => setLang(lang === "eng" ? "" : "eng")}>English</button>
@@ -520,5 +548,81 @@ export function ComparisonView({ comparisonId }: { comparisonId: string }) {
         </>
       )}
     </div>
+  );
+}
+
+
+// ------------------------------------------------------------------ check panels (levels 4, 5, 7)
+function ShadeBar({ r }: { r: ColourRow }) {
+  if (r.position == null) return null;
+  const pct = Math.min(100, Math.max(0, (r.position / 2) * 100));
+  return (
+    <span className="shade-bar" aria-hidden>
+      <i className="d" /><i className="s" /><i className="l" />
+      <b className={r.verdict} style={{ insetInlineStart: `${pct}%` }} />
+    </span>
+  );
+}
+
+function ColourPanel({ c }: { c: ColourRes }) {
+  const { t } = useI18n();
+  const vt = { pass: "ok", fail: "danger", screen: "warn", incomplete: "warn" } as const;
+  return (
+    <section className="panel check-panel">
+      <div className="panel-head"><h2>{t("check.colour")}</h2><span className="spacer" />
+        <Badge tone={vt[c.verdict as keyof typeof vt]}>{t(`colour.verdict.${c.verdict}` as StringKey)}</Badge></div>
+      <div className="panel-body small muted">{t("colour.lead", { tol: c.tolerance, flat: c.flat_tolerance,
+        conf: t(`shade.conf.${c.confidence}` as StringKey), set: t(`shade.conf.${c.set_confidence}` as StringKey) })}</div>
+      <div className="table-wrap"><table className="table ink-table">
+        <thead><tr><th>{t("shade.ink")}</th><th>{t("colour.swatches")}</th><th>ΔE00 {t("shade.standard")}</th><th>{t("colour.position")}</th><th>{t("colour.result")}</th></tr></thead>
+        <tbody>{c.inks.map((r) => (
+          <tr key={r.id}>
+            <td><span className="mono-id subtle">{r.id}</span> {r.name}{r.status === "flat" && <div className="cell-sub">{t("shade.ink.flat")}</div>}</td>
+            <td><span className="swatches"><Swatch lab={r.dark} label="D" /><Swatch lab={r.standard} label="S" /><Swatch lab={r.light} label="L" />
+              <span className="sep" /><Swatch lab={r.sample} label="●" /></span></td>
+            <td className="num">{r.de_standard ?? "—"}</td>
+            <td><ShadeBar r={r} /><div className="cell-sub">{r.where ?? r.reason}</div></td>
+            <td><Badge tone={vt[r.verdict as keyof typeof vt] ?? undefined}>{t(`colour.verdict.${r.verdict}` as StringKey)}</Badge></td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    </section>
+  );
+}
+
+function BarcodePanel({ b }: { b: BarcodeRes }) {
+  const { t } = useI18n();
+  return (
+    <section className="panel check-panel">
+      <div className="panel-head"><h2>{t("check.barcodes")}</h2><span className="spacer" />
+        <span className="small muted">{t("barcode.found", { a: b.approved, t: b.test })}</span></div>
+      {b.rows.length === 0 ? <div className="panel-body muted">{t("barcode.none")}</div> : (
+        <div className="table-wrap"><table className="table">
+          <thead><tr><th>{t("barcode.type")}</th><th>{t("rep.approved")}</th><th>{t("rep.test")}</th><th>GTIN</th><th>{t("colour.result")}</th></tr></thead>
+          <tbody>{b.rows.map((r, i) => (
+            <tr key={i}><td>{r.symbology}</td><td className="mono-id small">{r.approved ?? "—"}</td><td className="mono-id small">{r.test ?? "—"}</td>
+              <td className="mono-id small">{r.gtin ?? "—"}</td>
+              <td><Badge tone={r.status === "match" ? "ok" : r.status === "variable_data" ? undefined : "danger"}>{t(`barcode.status.${r.status}` as StringKey)}</Badge></td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      <div className="panel-body small subtle">{t("barcode.decoders", { d: b.decoders.join(", ") })}</div>
+    </section>
+  );
+}
+
+function PrintPanel({ p }: { p: PrintRes }) {
+  const { t } = useI18n();
+  return (
+    <section className="panel check-panel">
+      <div className="panel-head"><h2>{t("level.7")}</h2></div>
+      <dl className="facts panel-body">
+        {p.text_size && <div><dt>{t("print.textSize")}</dt><dd>{t("print.textSizeVal", { min: p.text_size.limit_pt, small: p.text_size.smallest_pt ?? "—",
+          med: p.text_size.median_pt ?? "—", how: t(`print.${p.text_size.measured}` as StringKey) })}</dd></div>}
+        {p.braille && <div><dt>{t("check.braille")}</dt><dd>{p.braille.found.length ? p.braille.found.map((b) => b.text).join(" / ") : t("print.noBraille")}
+          {p.braille.expected && <span className="cell-sub">{t("print.expected", { n: p.braille.expected })}</span>}</dd></div>}
+        {p.dieline && <div><dt>{t("check.dieline")}</dt><dd>{p.dieline.found ? t("print.dieline", { f: p.dieline.folds ?? 0, c: p.dieline.cuts ?? 0 }) : t("print.noDieline")}</dd></div>}
+      </dl>
+    </section>
   );
 }

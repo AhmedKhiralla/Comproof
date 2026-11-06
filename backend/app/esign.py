@@ -20,6 +20,15 @@ STATEMENTS = {
     "approved_master": "I approve this artwork version as the effective master for comparisons.",
     "withdrawn": "I withdraw this artwork version; it may no longer be used as a master.",
 }
+ENTITY_STATEMENTS = {
+    ("shade_set", "approved_master"): "I approve these Standard, Light and Dark shades and their measurement as the "
+                                      "colour reference for this packaging component.",
+    ("shade_set", "withdrawn"): "I withdraw this shade set; it may no longer be used as a colour reference.",
+}
+
+
+def statement(entity: str, meaning: str) -> str:
+    return ENTITY_STATEMENTS.get((entity, meaning), STATEMENTS[meaning])
 
 
 def sign(call: Call, *, entity: str, record_id: str, label: str, meaning: str, record_hash: str,
@@ -49,7 +58,7 @@ def sign(call: Call, *, entity: str, record_id: str, label: str, meaning: str, r
         "INSERT INTO signatures (tenant_id, entity, record_id, record_label, meaning, statement, reason, record_hash,"
         " user_id, user_name, user_email) VALUES (%s, %s, %s::uuid, %s, %s, %s, %s, %s, %s, %s, %s)"
         " RETURNING id, meaning, statement, reason, user_name, user_email, signed_at, record_hash",
-        call.tenant_id, entity, record_id, label, meaning, STATEMENTS[meaning], (reason or "").strip() or None,
+        call.tenant_id, entity, record_id, label, meaning, statement(entity, meaning), (reason or "").strip() or None,
         record_hash, u["id"], u["full_name"], row["email"])
     tx.event("SIGNED", entity, record_id, label, {"meaning": meaning, "record_hash": record_hash})
     return sig

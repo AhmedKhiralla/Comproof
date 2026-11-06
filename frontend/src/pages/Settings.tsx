@@ -13,7 +13,8 @@ interface SettingsData {
   company: { id: string; code: string; name: string; country: string; timezone: string; default_language: "en" | "ar" };
   features: Record<string, boolean>;
   feature_groups: Record<string, string>;
-  engine: { provider: string | null; reading_provider: string | null; exclude_phrases: string[]; rotated_text: "auto" | "ignore" | "read" };
+  engine: { provider: string | null; reading_provider: string | null; exclude_phrases: string[]; rotated_text: "auto" | "ignore" | "read";
+    colour_tolerance: number; flat_tolerance: number; min_font_pt: Record<string, number>; braille_required: string[]; cut_margin_mm: number };
   ai_providers: { name: string; label: string; vision_model: string; text_model: string }[];
   terminology: Record<string, { en: string; ar: string }>;
   terminology_defaults: Record<string, { en: string; ar: string }>;
@@ -74,7 +75,7 @@ function FeaturesTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Setti
   const [f, setF] = useState({ ...data.features });
   const s = useSaver(onSaved);
   const dirty = Object.keys(f).some((k) => f[k] !== data.features[k]);
-  const groups = ["levels", "review", "ai"];
+  const groups = ["levels", "checks", "review", "ai"];
   return (
     <div className="stack">
       <div className="row wrap">
@@ -198,7 +199,10 @@ function EngineTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Setting
   const save = () => s.run(() => put("/api/settings/engine", {
     provider: f.provider || null, reading_provider: f.reading_provider || null, rotated_text: f.rotated_text,
     exclude_phrases: f.phrases.split("\n").map((x) => x.trim()).filter(Boolean),
+    colour_tolerance: Number(f.colour_tolerance), flat_tolerance: Number(f.flat_tolerance), min_font_pt: f.min_font_pt,
+    braille_required: f.braille_required, cut_margin_mm: Number(f.cut_margin_mm),
   }));
+  const KINDS_ = ["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"];
   return (
     <form className="stack" onSubmit={(e) => { e.preventDefault(); save(); }}>
       <p className="muted">{t("engine.lead")}</p>
@@ -249,6 +253,36 @@ function EngineTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Setting
               <textarea id="eng-phrases" className="textarea" rows={6} value={f.phrases} onChange={(e) => setF({ ...f, phrases: e.target.value })} />
               <div className="hint">{t("engine.phrasesHint")}</div>
             </div>
+          </div>
+        </section>
+      </div>
+      <div className="grid-2" style={{ alignItems: "start" }}>
+        <section className="panel" aria-labelledby="eng-col">
+          <div className="panel-head"><h3 id="eng-col">{t("engine.colour")}</h3></div>
+          <div className="panel-body stack">
+            <TextField label={t("engine.colourTol")} type="number" step="0.1" min={0.5} max={10} value={String(f.colour_tolerance)}
+              onChange={(v) => setF({ ...f, colour_tolerance: Number(v) })} hint={t("engine.colourTolHint")} error={s.errs.colour_tolerance} />
+            <TextField label={t("engine.flatTol")} type="number" step="0.1" min={0.5} max={10} value={String(f.flat_tolerance)}
+              onChange={(v) => setF({ ...f, flat_tolerance: Number(v) })} hint={t("engine.flatTolHint")} error={s.errs.flat_tolerance} />
+          </div>
+        </section>
+        <section className="panel" aria-labelledby="eng-print">
+          <div className="panel-head"><h3 id="eng-print">{t("engine.print")}</h3></div>
+          <div className="panel-body stack">
+            <div className="field"><span className="label-like">{t("engine.minFont")}</span>
+              <div className="font-grid">{KINDS_.map((k) => (
+                <label key={k} className="small"><span>{t(`kind.${k}` as StringKey)}</span>
+                  <input className="input" type="number" step="0.5" min={4} max={20} value={f.min_font_pt?.[k] ?? 7}
+                    onChange={(e) => setF({ ...f, min_font_pt: { ...f.min_font_pt, [k]: Number(e.target.value) } })} /></label>))}</div>
+              <div className="hint">{t("engine.minFontHint")}</div></div>
+            <div className="field"><span className="label-like">{t("engine.braille")}</span>
+              <div className="row wrap">{KINDS_.map((k) => (
+                <label key={k} className="row small"><input type="checkbox" checked={f.braille_required.includes(k)}
+                  onChange={(e) => setF({ ...f, braille_required: e.target.checked ? [...f.braille_required, k] : f.braille_required.filter((x) => x !== k) })} />
+                  {t(`kind.${k}` as StringKey)}</label>))}</div>
+              <div className="hint">{t("engine.brailleHint")}</div></div>
+            <TextField label={t("engine.cutMargin")} type="number" step="0.5" min={0} max={10} value={String(f.cut_margin_mm)}
+              onChange={(v) => setF({ ...f, cut_margin_mm: Number(v) })} />
           </div>
         </section>
       </div>

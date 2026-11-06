@@ -7,7 +7,16 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 
 STEP_NAMES = {1: "Level 1 — Approved text audit", 2: "Level 2 — Content comparison",
-              3: "Level 3 — Punctuation & typography"}
+              3: "Level 3 — Punctuation & typography", 4: "Level 4 — Colour (shade standards)",
+              5: "Level 5 — Barcodes", 6: "Level 6 — Graphics & layout", 7: "Level 7 — Text size, Braille & dieline"}
+
+
+def _steps(result: dict) -> list[int]:
+    present = {f["step"] for f in result["findings"]} | {1, 2, 3}
+    for key, step in (("colour", 4), ("barcodes", 5), ("graphics", 6), ("print", 7)):
+        if key in (result.get("checks") or {}):
+            present.add(step)
+    return sorted(present)
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 
@@ -177,7 +186,7 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
 
     # summary
     summ = [["Level", "Critical", "Major", "Minor", "Info", "Confirmed", "Not a deviation", "Pending"]]
-    for s in (1, 2, 3):
+    for s in _steps(result):
         fs = [f for f in result["findings"] if f["step"] == s]
         cnt = lambda sev: sum(f["severity"] == sev for f in fs)
         dec = lambda d: sum(decisions.get(f["id"], {}).get("decision", "pending") == d for f in fs)
@@ -198,7 +207,7 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
         story += [Paragraph("Electronic signatures", h2), t]
 
     show_info = meta.get("_include_info", False)
-    for s in (1, 2, 3):
+    for s in _steps(result):
         fs = [f for f in result["findings"] if f["step"] == s and (show_info or f["severity"] != "info"
               or decisions.get(f["id"], {}).get("decision") == "confirmed")]
         story += [PageBreak(), Paragraph(STEP_NAMES[s], h2)]

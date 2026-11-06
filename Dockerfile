@@ -17,13 +17,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Tesseract with English and Arabic, complex-script shaping, fonts for the reports, LibreOffice for Word files.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara libraqm0 \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara libraqm0 libzbar0 \
       fonts-dejavu-core fonts-noto-core fonts-hosny-amiri \
       libreoffice-writer-nogui \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+ && (pip install --no-cache-dir "zxing-cpp>=2.2,<3" || echo "zxing-cpp unavailable: ZBar and OpenCV decode barcodes; DataMatrix needs zxing-cpp")
 COPY backend/ ./
 COPY --from=web /web/dist /app/frontend/dist
 RUN useradd --create-home --uid 10001 comproof && mkdir -p /data && chown comproof /data

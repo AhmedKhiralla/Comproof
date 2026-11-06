@@ -1,26 +1,29 @@
 # Comproof roadmap
 
-Phase 1 (released) covers text comparison for every packaging type with the Part 11 foundation. The phases
+Phase 1 (released) covers text comparison for every packaging type with the Part 11 foundation.
+Release 1.1 adds shade standards and colour (ΔE2000 against Standard / Light / Dark), barcodes, the graphics
+overlay, minimum text size, Braille and dieline checks (Levels 4–7). The items below marked *(1.1)* are done;
+the rest remain planned. The phases
 below follow the scope agreed for Comproof: all packaging materials, colour from every source, internal QA,
 print houses, approvals and production-line checks, for EDA, SFDA, the UAE and Gulf, and EU / export markets.
 
 ## Phase 2 — Cartons, labels, foil and tubes in depth
 
-- **Dielines and panels** — read the die-cut layer of the PDF, name panels (front, back, sides, flaps, glue
+- *(1.1, folds and cut edges)* **Dielines and panels** — read the die-cut layer of the PDF, name panels (front, back, sides, flaps, glue
   area) and compare panel by panel; flag text crossing a fold or into the glue or bleed zone.
-- **Barcodes and codes** — decode and grade GS1 DataMatrix, EAN-13 and QR (content, GTIN check digit, quiet
+- *(1.1)* **Barcodes and codes** — decode and *(planned)* grade GS1 DataMatrix, EAN-13 and QR (content, GTIN check digit, quiet
   zone, ISO/IEC 15415 / 15416 grade from scanner input); check the GTIN against the product record and the
   serialisation fields (batch, expiry, serial) against the market format.
 - **Market rule packs** — required statements and their order per market (EDA, SFDA, UAE MOHAP / EDE, other
   GCC, EU QRD template); mandatory Arabic, price field, registration number, storage and pharmacovigilance
   contacts; Braille presence and translation (EU) and dot height / pitch from the artwork.
-- **Font size checks** — minimum x-height / point size per market and per statement, from vector PDFs.
-- **Images and symbols** — logos, pictograms, warning symbols and their position compared visually
+- *(1.1)* **Font size checks** — minimum x-height / point size per market and per statement, from vector PDFs.
+- *(1.1, overlay)* **Images and symbols** — logos, pictograms, warning symbols and their position compared visually
   (perceptual hash and keypoint matching) alongside the text.
 - **Version-to-version change review** — compare the new master with the previous master to produce the
   change list that the change control must explain.
 
-## Phase 3 — Colour (ΔE)
+## Phase 3 — Colour (ΔE) *(1.1: shade standards, ΔE2000, scanner with and without target, spectro import, photo screening, correction advice)*
 
 - **Measurement sources** — spectrophotometer import (CxF3 and CGATS / IT8 text, X-Rite and Konica Minolta
   exports), PDF spot and process colours from the artwork, flatbed scans with a colour target

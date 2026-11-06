@@ -316,11 +316,20 @@ def update_security(call: Call):
     return get_settings.__wrapped__(call)
 
 
+KIND_NAMES = ("leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other")
+
+
 class EngineIn(BaseModel):
     provider: str | None = Field(default=None, max_length=40)
     reading_provider: str | None = Field(default=None, max_length=40)
     exclude_phrases: list[str] = Field(default_factory=list, max_length=200)
     rotated_text: Literal["auto", "ignore", "read"] = "auto"
+    colour_tolerance: float = Field(default=2.0, ge=0.5, le=10)
+    flat_tolerance: float = Field(default=3.0, ge=0.5, le=10)
+    min_font_pt: dict[str, float] = Field(default_factory=dict)
+    braille_required: list[Literal["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"]] = \
+        Field(default_factory=list)
+    cut_margin_mm: float = Field(default=1.5, ge=0, le=10)
 
 
 @endpoint(auth="tenant_admin", body=EngineIn)
@@ -332,8 +341,13 @@ def update_engine(call: Call):
         if val and val not in names:
             raise ApiError(422, "invalid", "Some fields need attention.", fields={key: "This AI provider is not configured on the server."})
     phrases = sorted({p.strip()[:200] for p in b.exclude_phrases if p.strip()})
+    sizes = {k: float(v) for k, v in b.min_font_pt.items() if k in KIND_NAMES}
+    if any(not 4 <= v <= 20 for v in sizes.values()):
+        raise ApiError(422, "invalid", "Some fields need attention.", fields={"min_font_pt": "Use 4 to 20 pt."})
     data = {"provider": b.provider or None, "reading_provider": b.reading_provider or None,
-            "exclude_phrases": phrases, "rotated_text": b.rotated_text}
+            "exclude_phrases": phrases, "rotated_text": b.rotated_text, "colour_tolerance": b.colour_tolerance,
+            "flat_tolerance": b.flat_tolerance, "min_font_pt": {**effective_engine(None)["min_font_pt"], **sizes},
+            "braille_required": sorted(set(b.braille_required)), "cut_margin_mm": b.cut_margin_mm}
     call.tx.x("UPDATE tenants SET engine = %s::jsonb WHERE id = %s", json.dumps(data), call.tenant_id)
     return get_settings.__wrapped__(call)
 

@@ -16,3 +16,6 @@ pytesseract>=0.3.13,<0.4
 opencv-python-headless>=4.10,<6
 numpy>=2.0,<3
 pillow>=10.4,<13
+# colour (L*a*b*, ΔE2000) and image analysis
+scikit-image>=0.24,<0.27
+scipy>=1.13,<2

@@ -65,6 +65,9 @@ API_ROUTES = [
     Route("/api/components/{component_id}", library.update_component, methods=["PATCH"]),
     Route("/api/components/{component_id}/artwork", library.create_artwork, methods=["POST"]),
     Route("/api/artwork/{artwork_id}/sign", library.sign_artwork, methods=["POST"]),
+    Route("/api/components/{component_id}/shades", library.create_shade_set, methods=["POST"]),
+    Route("/api/shades/{shade_id}/sign", library.sign_shade_set, methods=["POST"]),
+    Route("/api/shades/{shade_id}/preview/{which}.jpg", library.shade_preview, methods=["GET"]),
     # Comparisons
     Route("/api/comparisons", comparisons.list_comparisons, methods=["GET"]),
     Route("/api/comparisons", comparisons.create_comparison, methods=["POST"]),

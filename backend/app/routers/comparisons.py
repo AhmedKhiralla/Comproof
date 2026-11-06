@@ -103,6 +103,16 @@ class ComparisonIn(BaseModel):
     mirror_test: bool = False
     rotated_text: Literal["auto", "ignore", "read"] | None = None
     ai_read: bool | None = None
+    # checks beyond the text (each also needs the company feature switched on)
+    text: bool = True
+    colour: bool = True
+    barcodes: bool = True
+    graphics: bool = True
+    text_size: bool = True
+    braille: bool = True
+    dieline: bool = True
+    shade_set_id: str | None = None            # default: the component's effective shade set
+    sample_source: Literal["scan_target", "scan", "spectro", "photo"] = "scan"
 
 
 @endpoint(auth="tenant_user", body=ComparisonIn)
@@ -113,8 +123,11 @@ def create_comparison(call: Call):
         raise ApiError(403, "forbidden", "Reviewer or artwork editor access at this site is required to start a comparison.")
     tx = call.tx
     kind, artwork_id, ref_id, strengths = b.kind, None, b.reference_file_id, ""
+    product_name, gtin, shade_id = "", None, b.shade_set_id
     if b.component_id:
-        comp = tx.one("SELECT c.id, c.kind, c.languages, a.id AS artwork_id, a.file_id, p.strengths FROM components c"
+        comp = tx.one("SELECT c.id, c.kind, c.languages, a.id AS artwork_id, a.file_id, p.strengths, p.name AS product_name,"
+                      " p.gtin, (SELECT s.id FROM shade_sets s WHERE s.component_id = c.id AND s.status = 'effective')"
+                      " AS shade_set_id FROM components c"
                       " JOIN products p ON p.id = c.product_id"
                       " LEFT JOIN artwork_versions a ON a.component_id = c.id AND a.status = 'effective'"
                       " WHERE c.id = %s::uuid AND c.active", b.component_id)
@@ -122,6 +135,8 @@ def create_comparison(call: Call):
             raise ApiError(422, "invalid", "Some fields need attention.", fields={"component_id": "Choose an active component."})
         kind = kind or comp["kind"]
         strengths = comp["strengths"] or ""
+        product_name, gtin = comp["product_name"] or "", comp["gtin"]
+        shade_id = shade_id or (str(comp["shade_set_id"]) if comp["shade_set_id"] else None)
         if not ref_id:
             if not comp["artwork_id"]:
                 raise ApiError(422, "no_master", "This component has no effective approved artwork. Upload the approved file instead.",
@@ -136,6 +151,31 @@ def create_comparison(call: Call):
         raise ApiError(422, "invalid", "Some fields need attention.", fields={"test_file_id": "The two files are the same file."})
     t = tx.one("SELECT features, engine FROM tenants WHERE id = %s", call.tenant_id)
     f, eng = effective_features(t["features"]), effective_engine(t["engine"])
+    test_kind = tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid", b.test_file_id)
+    want_colour = b.colour and f["check_colour"]
+    colour_cfg = None
+    if want_colour and shade_id:
+        sh = tx.one("SELECT id, status, verification, measurement_sha256, source FROM shade_sets WHERE id = %s::uuid"
+                    " AND component_id = %s::uuid", shade_id, b.component_id)
+        if not sh:
+            raise ApiError(422, "invalid", "Some fields need attention.", fields={"shade_set_id": "Choose a shade set of this component."})
+        if sh["status"] != "effective":
+            raise ApiError(422, "invalid", "Some fields need attention.",
+                           fields={"shade_set_id": "Only an approved (effective) shade set can be used as the reference."})
+        sample_source = "spectro" if test_kind == "spectro" else b.sample_source
+        if (sh["source"] == "spectro") != (sample_source == "spectro"):
+            raise ApiError(422, "invalid", "Some fields need attention.",
+                           fields={"test_file_id": "Measure the sample the same way as the shade set: spectrophotometer "
+                                                   "files with spectrophotometer files, scans with scans."})
+        colour_cfg = {"shade_set_id": str(sh["id"]), "measurement_sha256": sh["measurement_sha256"],
+                      "tolerance": float(eng["colour_tolerance"]), "flat_tolerance": float(eng["flat_tolerance"]),
+                      "sample_source": sample_source}
+    elif test_kind == "spectro":
+        raise ApiError(422, "invalid", "Some fields need attention.",
+                       fields={"test_file_id": "A measurement file can only be checked against an approved shade set "
+                                               "measured with a spectrophotometer."})
+    do_text = b.text and test_kind != "spectro"
+    k = kind or "leaflet"
     settings = {
         "kind": kind or "leaflet", "languages": b.languages,
         "strengths": sorted({x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", strengths)}), "step1": b.step1 and f["step1_master_audit"],
@@ -143,15 +183,26 @@ def create_comparison(call: Call):
         "rotated_text": b.rotated_text or eng["rotated_text"], "mirror_test": b.mirror_test,
         "ai": {"provider": eng["provider"], "reading_provider": eng["reading_provider"], "review": f["ai_review"],
                "science": f["ai_science"], "read": f["ai_reading"] if b.ai_read is None else (b.ai_read and f["ai_reading"])},
+        "text": do_text,
+        "checks": {"colour": colour_cfg, "barcodes": do_text and b.barcodes and f["check_barcodes"],
+                   "graphics": do_text and b.graphics and f["check_graphics"],
+                   "text_size": do_text and b.text_size and f["check_text_size"],
+                   "braille": do_text and b.braille and f["check_braille"],
+                   "dieline": do_text and b.dieline and f["check_dieline"]},
+        "product": {"name": product_name, "gtin": gtin, "purpose": b.purpose},
+        "min_font_pt": float((eng.get("min_font_pt") or {}).get(k, 7.0)),
+        "braille_required": k in (eng.get("braille_required") or []),
+        "cut_margin_mm": float(eng.get("cut_margin_mm", 1.5)),
     }
     number = tx.val("SELECT cp_next_comparison_number(%s::uuid)", call.tenant_id)
     row = tx.one(
         "INSERT INTO comparisons (tenant_id, site_id, number, title, purpose, component_id, artwork_version_id,"
-        " reference_file_id, test_file_id, supplier, reference_no, settings, progress)"
-        " VALUES (%s, %s::uuid, %s, %s, %s, %s::uuid, %s, %s::uuid, %s::uuid, %s, %s, %s::jsonb, 'Waiting to start')"
-        " RETURNING id",
+        " reference_file_id, test_file_id, supplier, reference_no, settings, progress, shade_set_id)"
+        " VALUES (%s, %s::uuid, %s, %s, %s, %s::uuid, %s, %s::uuid, %s::uuid, %s, %s, %s::jsonb, 'Waiting to start',"
+        " %s::uuid) RETURNING id",
         call.tenant_id, b.site_id, number, b.title.strip(), b.purpose, b.component_id, artwork_id, ref_id,
-        b.test_file_id, (b.supplier or "").strip() or None, (b.reference_no or "").strip() or None, json.dumps(settings))
+        b.test_file_id, (b.supplier or "").strip() or None, (b.reference_no or "").strip() or None, json.dumps(settings),
+        colour_cfg["shade_set_id"] if colour_cfg else None)
     from ..worker import wake
     wake()
     return {"id": row["id"], "number": number}

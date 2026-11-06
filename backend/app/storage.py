@@ -38,7 +38,12 @@ def sniff(data: bytes, filename: str) -> tuple[str, str]:
             if ext == ".docx" and not filename.lower().endswith(".docx"):
                 break
             return mime, ext
-    raise StorageError("Upload a PDF, PNG, JPEG, TIFF or Word (.docx) file.")
+    head = data[:4000].decode("utf-8", "ignore")
+    if ("BEGIN_DATA" in head and ("LAB_L" in head or "CGATS" in head or "IT8" in head)):
+        return "text/plain", ".cgats"
+    if head.lstrip().startswith("<") and "CxF" in head:
+        return "application/xml", ".cxf"
+    raise StorageError("Upload a PDF, PNG, JPEG, TIFF, Word (.docx) or spectrophotometer (CxF / CGATS) file.")
 
 
 def key_for(tenant_id: str, sha: str, ext: str) -> str:
@@ -104,4 +109,7 @@ def describe(data: bytes, mime: str) -> tuple[int | None, str]:
         return n, "pdf-vector" if chars > 40 else "pdf-scan"
     if mime.startswith("image/"):
         return 1, "image"
+    if mime in ("text/plain", "application/xml"):
+        from .engine.colour import parse_spectro
+        return len(parse_spectro(data)), "spectro"      # page_count = number of measured patches
     return None, "docx"

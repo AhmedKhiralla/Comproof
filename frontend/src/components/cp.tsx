@@ -117,7 +117,7 @@ export function FileDrop({ label, hint, value, onChange, error }: {
           </span>
         </button>
       )}
-      <input ref={input} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx"
+      <input ref={input} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx,.cxf,.cgats,.txt"
         onChange={(e) => { take(e.target.files?.[0]); e.target.value = ""; }} />
       {(err || error) && <div className="error" role="alert">{err || error}</div>}
     </div>
@@ -127,8 +127,8 @@ export function FileDrop({ label, hint, value, onChange, error }: {
 export type Meaning = "reviewed" | "approved" | "rejected" | "approved_master" | "withdrawn";
 
 /** Electronic signature: shows the statement and the meaning, re-asks for email and password (21 CFR 11.200). */
-export function SignDialog({ meaning, label, needsReason, blockers, onSign, onClose }: {
-  meaning: Meaning; label: string; needsReason?: boolean; blockers?: string[];
+export function SignDialog({ meaning, label, needsReason, blockers, onSign, onClose, statementKey, titleKey }: {
+  meaning: Meaning; label: string; needsReason?: boolean; blockers?: string[]; statementKey?: StringKey; titleKey?: StringKey;
   onSign: (body: { meaning: Meaning; email: string; password: string; reason?: string }) => Promise<void>; onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -146,14 +146,14 @@ export function SignDialog({ meaning, label, needsReason, blockers, onSign, onCl
   };
   const danger = meaning === "rejected" || meaning === "withdrawn";
   return (
-    <Dialog title={t(`sign.title.${meaning}` as StringKey)} onClose={onClose} footer={<>
+    <Dialog title={t(titleKey ?? (`sign.title.${meaning}` as StringKey))} onClose={onClose} footer={<>
       <Button onClick={onClose}>{t("common.cancel")}</Button>
       <Button variant={danger ? "danger" : "primary"} icon={<LuLockKeyhole />} busy={busy}
         disabled={!email || !password || (needsReason && reason.trim().length < 3)} onClick={submit}>{t(`sign.do.${meaning}` as StringKey)}</Button>
     </>}>
       <form className="stack" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="sign-record"><span className="small muted">{t("sign.record")}</span><strong>{label}</strong></div>
-        <blockquote className="sign-statement">{t(`sign.statement.${meaning}` as StringKey)}</blockquote>
+        <blockquote className="sign-statement">{t(statementKey ?? (`sign.statement.${meaning}` as StringKey))}</blockquote>
         {blockers && blockers.length > 0 && <Notice tone="warn"><ul className="plain">{blockers.map((b) => <li key={b}>{b}</li>)}</ul></Notice>}
         {err && <Notice tone="danger">{err}</Notice>}
         {(needsReason || meaning === "approved") && (
