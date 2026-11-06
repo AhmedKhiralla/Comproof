@@ -234,6 +234,9 @@ SIG_NUM = re.compile(r"(\d+(?:[.,]\d+)?\s*/\s*\d+(?:[.,]\d+)*"          # fracti
 def _numbers(s: str) -> list[str]:
     """Clinically meaningful numbers only — stray single digits from OCR specks are ignored."""
     s = fix_ar_digits(BIDI.sub("", unicodedata.normalize("NFKC", s))).translate(AR_INDIC).replace("٫", ".")
+    # A comma followed by one or two digits is a decimal comma (Arabic leaflets print ١,٢٥ for 1.25);
+    # a comma before three digits stays a thousands separator (10,000).
+    s = re.sub(r"(\d),(\d{1,2})(?!\d)", r"\1.\2", s)
     return sorted(re.sub(r"\s|,", "", m).replace("٫", ".") for m in SIG_NUM.findall(s))
 
 
@@ -285,7 +288,7 @@ def _display(tokens: list[Token]) -> str:
         if t.box is last:
             continue
         last = t.box
-        out.append(BIDI.sub("", t.raw))
+        out.append(fix_ar_digits(BIDI.sub("", t.raw)))   # show Arabic-Indic numbers in reading order
     return " ".join(out)
 
 

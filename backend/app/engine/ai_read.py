@@ -68,10 +68,13 @@ def _words_in_box(text: str, box: list, rtl: bool, conf: float = 96.0) -> list[W
     total = sum(len(w) for w in words) + (len(words) - 1)
     unit = (x1 - x0) / max(1, total)
     out, pos = [], 0.0
+    from .compare import fix_ar_digits
     for w in words:
         a, b = pos * unit, (pos + len(w)) * unit
         bx = [x1 - b, y0, x1 - a, y1] if rtl else [x0 + a, y0, x0 + b, y1]
-        out.append(Word(w, bx, conf))
+        # The model writes Arabic-Indic numbers in reading order (١٠ = 10); the comparison works in Tesseract's
+        # visual order (٠١), so store them that way and every downstream step treats both sources alike.
+        out.append(Word(fix_ar_digits(w), bx, conf))
         pos += len(w) + 1
     return out
 
