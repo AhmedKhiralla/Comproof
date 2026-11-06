@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 COPY --from=web /web/dist /app/frontend/dist
 RUN useradd --create-home --uid 10001 comproof && mkdir -p /data && chown comproof /data
-USER comproof
-VOLUME ["/data"]
 EXPOSE 8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+# Railway mounts its volume at /data owned by root (no Dockerfile VOLUME allowed): take ownership of the
+# volume as root, then drop to the unprivileged comproof user for the server itself.
+CMD ["sh", "-c", "mkdir -p \"${DATA_DIR:-/data}\" && chown comproof \"${DATA_DIR:-/data}\" && HOME=/home/comproof exec setpriv --reuid=comproof --regid=comproof --init-groups uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
