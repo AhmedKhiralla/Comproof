@@ -112,14 +112,16 @@ def create_comparison(call: Call):
     if not can_start(call, b.site_id):
         raise ApiError(403, "forbidden", "Reviewer or artwork editor access at this site is required to start a comparison.")
     tx = call.tx
-    kind, artwork_id, ref_id = b.kind, None, b.reference_file_id
+    kind, artwork_id, ref_id, strengths = b.kind, None, b.reference_file_id, ""
     if b.component_id:
-        comp = tx.one("SELECT c.id, c.kind, c.languages, a.id AS artwork_id, a.file_id FROM components c"
+        comp = tx.one("SELECT c.id, c.kind, c.languages, a.id AS artwork_id, a.file_id, p.strengths FROM components c"
+                      " JOIN products p ON p.id = c.product_id"
                       " LEFT JOIN artwork_versions a ON a.component_id = c.id AND a.status = 'effective'"
                       " WHERE c.id = %s::uuid AND c.active", b.component_id)
         if not comp:
             raise ApiError(422, "invalid", "Some fields need attention.", fields={"component_id": "Choose an active component."})
         kind = kind or comp["kind"]
+        strengths = comp["strengths"] or ""
         if not ref_id:
             if not comp["artwork_id"]:
                 raise ApiError(422, "no_master", "This component has no effective approved artwork. Upload the approved file instead.",
@@ -135,7 +137,8 @@ def create_comparison(call: Call):
     t = tx.one("SELECT features, engine FROM tenants WHERE id = %s", call.tenant_id)
     f, eng = effective_features(t["features"]), effective_engine(t["engine"])
     settings = {
-        "kind": kind or "leaflet", "languages": b.languages, "step1": b.step1 and f["step1_master_audit"],
+        "kind": kind or "leaflet", "languages": b.languages,
+        "strengths": sorted({x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", strengths)}), "step1": b.step1 and f["step1_master_audit"],
         "step3": b.step3 and f["step3_typography"], "exclude_phrases": eng["exclude_phrases"],
         "rotated_text": b.rotated_text or eng["rotated_text"], "mirror_test": b.mirror_test,
         "ai": {"provider": eng["provider"], "reading_provider": eng["reading_provider"], "review": f["ai_review"],

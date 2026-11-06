@@ -176,7 +176,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
     # ---- Level 1: approved text audit
     if settings.get("step1", True):
         progress("Level 1: auditing the approved text")
-        findings = master_checks.run(ref_regions)
+        findings = master_checks.run(ref_regions, known_strengths=settings.get("strengths") or [])
         _enrich_step1(findings, ref_regions)
         if review_p and ai_cfg.get("science"):
             progress("Level 1: AI scientific review")
@@ -252,7 +252,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     # ---- AI review of each comparison finding
     if review_p and ai_cfg.get("review"):
-        todo = [f for f in findings if f.step in (2, 3) and f.needs_ai]
+        # Findings already resolved by the high-resolution re-read stay as they are.
+        todo = [f for f in findings if f.step in (2, 3) and f.needs_ai and not f.note.startswith("Resolved on re-read")]
         done = [0]
         lock = threading.Lock()
         stopped: list[str] = []
@@ -263,12 +264,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                 return
             try:
                 f.ai = ai.review(review_p, rc, dc, f.ref_text, f.des_text, f.lang)
-                if f.ai.get("verdict") == "ocr_noise":
-                    f.severity = "info"
-                elif f.ai.get("verdict") == "real_difference" and f.ai.get("impact") in SEV_ORDER:
-                    f.severity = min(f.severity, f.ai["impact"], key=lambda s: SEV_ORDER.get(s, 3))
-                    if f.severity == "info":
-                        f.severity = "minor"
+                apply_review(f)
             except ai.AIConfigError as e:
                 with lock:
                     if not stopped:
@@ -337,6 +333,35 @@ def _read_loc(doc, loc, lang, grow=0):
     for w in " ".join(out).split():
         toks += compare.norm_word(w, lang)
     return "".join(toks)
+
+
+def _same_reading(a: str, b: str, lang: str) -> bool:
+    na = "".join(t for w in (a or "").split() for t in compare.norm_word(w, lang))
+    nb = "".join(t for w in (b or "").split() for t in compare.norm_word(w, lang))
+    return bool(na) and na == nb and compare._numbers(a) == compare._numbers(b)
+
+
+def apply_review(f) -> None:
+    """Turn the AI's answer into a severity, conservatively.
+    * The AI never raises a severity; the engine's rules decide how serious a real difference is.
+    * "OCR noise" is accepted only when the AI's own transcriptions of both images agree (words and numbers);
+      a verdict that contradicts its own readings is recorded as "unclear" and the finding stays open."""
+    a = f.ai or {}
+    v = a.get("verdict")
+    ra, rd = str(a.get("approved_reads", "")).strip(), str(a.get("design_reads", "")).strip()
+    # Level 3 is about punctuation and spacing, so only an exact match counts as "the same" there.
+    same = (bool(ra) and ra == rd) if f.step == 3 else _same_reading(ra, rd, f.lang)
+    if v == "ocr_noise" or (v == "real_difference" and same):
+        if same:
+            a["verdict"] = "ocr_noise"
+            f.severity = "info"
+        else:
+            a["verdict"] = "unclear"
+            a["explanation"] = ("The AI called this a misreading, but its own readings of the two images differ; "
+                                "check it by eye. " + str(a.get("explanation", ""))).strip()
+    elif v == "real_difference" and f.severity == "info":
+        f.severity = "minor"     # the engine thought it was noise; a person should look
+    f.ai = a
 
 
 def reread(ref, des, f) -> str:

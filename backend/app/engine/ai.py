@@ -200,16 +200,22 @@ def read_tile(provider: Provider, img, lang: str) -> tuple[str, list[str]]:
 
 # ------------------------------------------------------------------ review
 REVIEW_PROMPT = """You are a pharmaceutical QA reviewer comparing an APPROVED packaging text (image 1)
-with the NEW artwork or printed sample (image 2). The comparison engine flagged this difference ({lang}):
-  approved reads: "{ref}"
-  new reads:      "{des}"
-The engine may have misread scanned text. Read both images yourself.
+with the NEW artwork or printed sample (image 2). A text-recognition engine flagged a possible difference ({lang}).
+Its readings are often WRONG on scans (for example ت read instead of ن, "!" instead of "l", "S" instead of "5",
+a lost decimal point, or a line taken from the wrong column):
+  engine read approved: "{ref}"
+  engine read new:      "{des}"
+Do not trust these readings. Look only at the images:
+1. Find the words in the highlighted area of image 1 and copy them exactly as printed into "approved_reads".
+2. Find the corresponding words in image 2 and copy them exactly as printed into "design_reads".
+3. Compare YOUR two transcriptions, not the engine's. If they say the same thing, the verdict is "ocr_noise".
 Ignore fonts, bold/italic, colours, line breaks, layout, stamps, signatures and headers/footers.
-Judge wording, numbers, punctuation and spacing only.
+Judge wording, numbers, punctuation and spacing only. Do not judge which version is medically better:
+any real change from the approved text is a "real_difference", even a correction.
 Return JSON: {{"verdict": "real_difference" | "ocr_noise" | "unclear",
 "approved_reads": "...", "design_reads": "...",
 "impact": "none" | "minor" | "major" | "critical",
-"explanation": "one sentence in plain English"}}"""
+"explanation": "one sentence in plain English describing what is printed differently"}}"""
 
 
 def review(provider: Provider, ref_img, des_img, ref_txt: str, des_txt: str, lang: str) -> dict:
@@ -226,7 +232,10 @@ def review(provider: Provider, ref_img, des_img, ref_txt: str, des_txt: str, lan
 
 # ------------------------------------------------------------------ science
 SCIENCE_PROMPT = """You are a senior regulatory pharmacist auditing an APPROVED packaging text ({kind}) before it is
-used as the master for artwork checks. The text comes from OCR of a scan, so ignore obvious OCR character noise.
+used as the master for artwork checks. The text comes from OCR of a scan and contains reading errors (wrong letters, lost decimal points, broken
+words, odd bullet symbols, garbled fragments). Report a problem ONLY if it would still be a problem in a perfect
+reading of the printed leaflet. Never report garbled or misread characters, bullet or formatting style, or layout,
+and never recommend moving content between sections.
 Check:
 1. Strengths against composition, dose and titration logic, maximum dose, units, frequency.
 2. Dosage-form wording used consistently (e.g. film vs tablet).

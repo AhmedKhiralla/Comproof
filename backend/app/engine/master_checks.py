@@ -32,7 +32,7 @@ def _lines(regions, lang="eng"):
             yield r.page, ln
 
 
-def run(ref_regions, start_id: int = 1) -> list[Finding]:
+def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None) -> list[Finding]:
     lines = list(_lines(ref_regions))
     out: list[Finding] = []
     n = start_id
@@ -47,6 +47,7 @@ def run(ref_regions, start_id: int = 1) -> list[Finding]:
     # Strengths printed in the title block, used to repair OCR that drops a decimal point ("25mg" for "2.5mg").
     head = " ".join(ln.text for _, ln in lines[:25])
     strengths = {x.replace(",", ".") for x in re.findall(r"(\d+(?:[.,]\d+)?)\s*mg", head, re.I)}
+    strengths |= set(known_strengths or [])          # strengths registered on the product in the library
 
     def fix(v: str) -> str:
         v = v.replace(",", ".")
