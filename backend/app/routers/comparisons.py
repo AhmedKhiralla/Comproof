@@ -385,6 +385,11 @@ def _meta(call: Call, c: dict, res: dict) -> dict:
         "AI models": "; ".join(f"{k}: {v}" for k, v in (("reading", ai_info.get("reading_model")),
                                                         ("review", ai_info.get("vision_model")),
                                                         ("science", ai_info.get("science_model"))) if v) or "not used",
+        "Levels run": ", ".join(n for n, on in (("1 approved-text audit", (c.get("settings") or {}).get("step1", True)),
+                                                ("2 content", True),
+                                                ("3 punctuation and typography", (c.get("settings") or {}).get("step3", True)))
+                                if on),
+        "AI notes": " ".join(ai_info.get("notes") or []) or "—",
         "Reading order": ", ".join(f"{k}: approved {v['approved']}, test {v['design']}, similarity {v['similarity']}"
                                    for k, v in res.get("reading_order", {}).items()),
         "Printed": _ts(call.tx.val("SELECT now()")),

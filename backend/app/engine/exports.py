@@ -6,36 +6,55 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont
 
-STEP_NAMES = {1: "Step 1 — Approved leaflet audit", 2: "Step 2 — Content comparison",
-              3: "Step 3 — Punctuation & typography"}
+STEP_NAMES = {1: "Level 1 — Approved text audit", 2: "Level 2 — Content comparison",
+              3: "Level 3 — Punctuation & typography"}
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 
 
 def _font_path():
     for p in (os.environ.get("REPORT_FONT", ""), FONT,
+              "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
               "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf"):
         if p and os.path.exists(p):
             return p
     return None
 
 
-def text_image(text: str, width_px: int = 900, size: int = 22) -> Image.Image:
-    """Render (possibly Arabic, RTL) text to an image — ReportLab cannot shape Arabic."""
+def _first_strong_rtl(text: str) -> bool:
+    for c in text:
+        if "\u0600" <= c <= "\u06ff" or "\u0750" <= c <= "\u077f" or "\ufb50" <= c <= "\ufeff":
+            return True
+        if c.isalpha():
+            return False
+    return False
+
+
+def has_arabic(text: str) -> bool:
+    return any("\u0600" <= c <= "\u06ff" for c in text or "")
+
+
+def text_image(text: str, width_px: int = 900, size: int = 22, max_lines: int = 12) -> Image.Image:
+    """Render text that contains Arabic to an image. ReportLab cannot shape Arabic, so mixed English/Arabic
+    lines are laid out by libraqm (bidi + shaping); the paragraph direction follows its first strong letter."""
     fp = _font_path()
     font = ImageFont.truetype(fp, size, layout_engine=ImageFont.Layout.RAQM) if fp else ImageFont.load_default()
-    rtl = any("؀" <= c <= "ۿ" for c in text)
+    rtl = _first_strong_rtl(text)
+    direction = "rtl" if rtl else "ltr"
     words, lines, cur = text.split(), [], ""
     probe = ImageDraw.Draw(Image.new("RGB", (10, 10)))
     for w in words:
         t = (cur + " " + w).strip()
-        if probe.textlength(t, font=font, direction="rtl" if rtl else None) > width_px - 20 and cur:
+        if probe.textlength(t, font=font, direction=direction) > width_px - 20 and cur:
             lines.append(cur)
             cur = w
         else:
             cur = t
     if cur:
         lines.append(cur)
-    lines = lines[:12] or [""]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] += " …"
+    lines = lines or [""]
     h = int(size * 1.5) * len(lines) + 10
     img = Image.new("RGB", (width_px, h), "white")
     d = ImageDraw.Draw(img)
@@ -45,7 +64,7 @@ def text_image(text: str, width_px: int = 900, size: int = 22) -> Image.Image:
             wln = d.textlength(ln, font=font, direction="rtl")
             d.text((width_px - 10 - wln, y), ln, font=font, fill="black", direction="rtl")
         else:
-            d.text((10, y), ln, font=font, fill="black")
+            d.text((10, y), ln, font=font, fill="black", direction="ltr")
     return img
 
 
@@ -117,8 +136,8 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
     def footer(c, d):
         c.saveState()
         c.setFont("Helvetica", 7)
-        c.drawString(15 * mm, 8 * mm, f"Leaflet Audit {meta.get('Audit ID', '')} · {meta.get('Product', '')} · "
-                                      f"engine {result['engine_version']}")
+        c.drawString(15 * mm, 8 * mm, f"Comproof {meta.get('Comparison', meta.get('Audit ID', ''))} · "
+                                      f"engine {result['engine_version']} · result SHA-256 {str(meta.get('Result SHA-256', ''))[:16]}…")
         c.drawRightString(A4[0] - 15 * mm, 8 * mm, f"Page {d.page}")
         c.restoreState()
 
@@ -134,19 +153,22 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
         w0, h0 = Image.open(p).size
         return RLImage(buf, w0 * r, h0 * r)
 
-    def txt_flow(t, w):
-        if any("؀" <= c <= "ۿ" for c in t):
-            im = text_image(t, 900, 22)
+    from xml.sax.saxutils import escape
+
+    def txt_flow(t, w, lines=12):
+        """Plain paragraph, or an image of the text when it contains Arabic (never black boxes)."""
+        t = str(t or "")
+        if has_arabic(t):
+            im = text_image(t, 1100, 17, lines)
             buf = io.BytesIO()
             im.save(buf, "PNG")
             buf.seek(0)
             r = w / im.width
             return RLImage(buf, im.width * r, im.height * r)
-        from xml.sax.saxutils import escape
-        return Paragraph(escape(t[:700]) or "—", small)
+        return Paragraph(escape(t[:900]) or "—", small)
 
-    story = [Paragraph("Leaflet Compliance Audit Report", h1)]
-    rows = [[k, Paragraph(str(v), small)] for k, v in meta.items()]
+    story = [Paragraph("Comproof · Comparison report", h1)]
+    rows = [[k, txt_flow(v, W - 47 * mm, 4)] for k, v in meta.items() if not k.startswith("_")]
     t = Table(rows, colWidths=[45 * mm, W - 45 * mm])
     t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
                            ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#EEF2F7")),
@@ -154,13 +176,13 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
     story += [t, Spacer(1, 6 * mm)]
 
     # summary
-    summ = [["Step", "Critical", "Major", "Minor", "Info", "Accepted", "Rejected", "Pending"]]
+    summ = [["Level", "Critical", "Major", "Minor", "Info", "Confirmed", "Not a deviation", "Pending"]]
     for s in (1, 2, 3):
         fs = [f for f in result["findings"] if f["step"] == s]
         cnt = lambda sev: sum(f["severity"] == sev for f in fs)
         dec = lambda d: sum(decisions.get(f["id"], {}).get("decision", "pending") == d for f in fs)
         summ.append([STEP_NAMES[s], cnt("critical"), cnt("major"), cnt("minor"), cnt("info"),
-                     dec("confirmed"), dec("rejected"), dec("pending")])
+                     dec("confirmed"), dec("not_deviation"), dec("pending")])
     t = Table(summ, colWidths=[62 * mm] + [(W - 62 * mm) / 7] * 7)
     t.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 8), ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
                            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1F3A5F")),
@@ -185,7 +207,7 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
         for f in fs:
             dec = decisions.get(f["id"], {})
             ai = f.get("ai") or {}
-            hdr = Table([[f["id"], f["severity"].upper(), Paragraph(f["title"], small),
+            hdr = Table([[f["id"], f["severity"].upper(), txt_flow(f["title"], W - 66 * mm, 2),
                           dec.get("decision", "pending")]],
                         colWidths=[14 * mm, 20 * mm, W - 64 * mm, 30 * mm])
             hdr.setStyle(TableStyle([("BACKGROUND", (1, 0), (1, 0), sevcol.get(f["severity"], colors.grey)),
@@ -220,11 +242,10 @@ def pdf(result: dict, decisions: dict, shots_dir: str, path: str, meta: dict, si
                 notes.append(f["note"])
             if dec.get("comment"):
                 notes.append(f"Reviewer ({dec.get('user', '')}): {dec['comment']}")
-            from xml.sax.saxutils import escape
-            block = [hdr, bt] + [Paragraph(escape(n), small) for n in notes] + [Spacer(1, 4 * mm)]
+            block = [hdr, bt] + [txt_flow(n, W, 6) for n in notes] + [Spacer(1, 4 * mm)]
             story.append(KeepTogether(block))
     doc = SimpleDocTemplate(path, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
-                            topMargin=14 * mm, bottomMargin=14 * mm, title="Leaflet Audit Report")
+                            topMargin=14 * mm, bottomMargin=14 * mm, title="Comproof comparison report", author="Comproof · Comp11 Labs")
     doc.build(story, onFirstPage=footer, onLaterPages=footer)
 
 

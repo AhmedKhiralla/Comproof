@@ -93,6 +93,9 @@ def make_reader(provider: ai.Provider, stats: dict, lock: threading.Lock):
             elif tile.width < 700:
                 f = 700 / tile.width
                 tile = tile.resize((700, int(tile.height * f)), Image.LANCZOS)
+            if stats.get("config_error"):
+                new_lines += in_band            # provider refused the request: keep OCR, stop calling it
+                continue
             try:
                 model, lines = ai.read_tile(provider, tile, reg.lang)
                 with lock:
@@ -100,6 +103,8 @@ def make_reader(provider: ai.Provider, stats: dict, lock: threading.Lock):
                     stats["model"] = model
             except ai.AIUnavailable as e:
                 with lock:
+                    if isinstance(e, ai.AIConfigError):
+                        stats["config_error"] = True
                     stats["failed"] = stats.get("failed", 0) + 1
                     stats["error"] = str(e)[:300]
                 new_lines += in_band

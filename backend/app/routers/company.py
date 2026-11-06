@@ -336,3 +336,19 @@ def update_engine(call: Call):
             "exclude_phrases": phrases, "rotated_text": b.rotated_text}
     call.tx.x("UPDATE tenants SET engine = %s::jsonb WHERE id = %s", json.dumps(data), call.tenant_id)
     return get_settings.__wrapped__(call)
+
+
+class AITestIn(BaseModel):
+    provider: str = Field(min_length=1, max_length=40)
+
+
+@endpoint(auth="tenant_admin", body=AITestIn)
+def test_ai(call: Call):
+    """Send one tiny request to the provider's text and vision models and report what works."""
+    p = ai.pick(call.body.provider)
+    if not p or not p.key:
+        raise ApiError(422, "invalid", "Some fields need attention.", fields={"provider": "This AI provider is not configured on the server."})
+    results = ai.test(p)
+    call.tx.event("INTEGRITY_CHECK", "tenants", str(call.tenant_id), f"AI connection test: {p.label}",
+                  {"results": results})
+    return {"provider": p.label, "results": results}

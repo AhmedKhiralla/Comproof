@@ -255,9 +255,12 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         todo = [f for f in findings if f.step in (2, 3) and f.needs_ai]
         done = [0]
         lock = threading.Lock()
+        stopped: list[str] = []
 
         def one(f):
             rc, dc = crops[f.id]
+            if stopped:
+                return
             try:
                 f.ai = ai.review(review_p, rc, dc, f.ref_text, f.des_text, f.lang)
                 if f.ai.get("verdict") == "ocr_noise":
@@ -266,8 +269,12 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                     f.severity = min(f.severity, f.ai["impact"], key=lambda s: SEV_ORDER.get(s, 3))
                     if f.severity == "info":
                         f.severity = "minor"
+            except ai.AIConfigError as e:
+                with lock:
+                    if not stopped:
+                        stopped.append(str(e))
             except ai.AIUnavailable as e:
-                f.ai = {"verdict": "unclear", "explanation": f"AI review unavailable: {e}"}
+                f.ai = {"verdict": "unclear", "explanation": f"AI review unavailable for this finding: {e}"}
             with lock:
                 done[0] += 1
                 if done[0] % 5 == 0 or done[0] == len(todo):
@@ -276,6 +283,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         with ThreadPoolExecutor(max_workers=4) as ex:
             list(ex.map(one, todo))
         ai_info["vision_model"] = next((f.ai.get("model") for f in todo if f.ai and f.ai.get("model")), None)
+        if stopped:
+            ai_info["notes"].append(f"AI review was not used: {stopped[0]}")
         check()
 
     # ---- page previews for the interactive viewer

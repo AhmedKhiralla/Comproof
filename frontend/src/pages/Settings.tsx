@@ -186,6 +186,15 @@ function EngineTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Setting
   const s = useSaver(onSaved);
   const [f, setF] = useState({ ...data.engine, phrases: data.engine.exclude_phrases.join("\n") });
   const providers = [{ value: "", label: t("engine.firstAvailable") }, ...data.ai_providers.map((p) => ({ value: p.name, label: p.label }))];
+  type TestRow = { role: string; model: string; ok: boolean; ms?: number; error?: string };
+  const [tests, setTests] = useState<Record<string, TestRow[]>>({});
+  const [testing, setTesting] = useState<string | null>(null);
+  const runTest = async (name: string) => {
+    setTesting(name);
+    try { const r = await post<{ results: TestRow[] }>("/api/settings/engine/test", { provider: name }); setTests((x) => ({ ...x, [name]: r.results })); }
+    catch (e) { setTests((x) => ({ ...x, [name]: [{ role: "text", model: "—", ok: false, error: errorText(e, t) }] })); }
+    finally { setTesting(null); }
+  };
   const save = () => s.run(() => put("/api/settings/engine", {
     provider: f.provider || null, reading_provider: f.reading_provider || null, rotated_text: f.rotated_text,
     exclude_phrases: f.phrases.split("\n").map((x) => x.trim()).filter(Boolean),
@@ -206,7 +215,24 @@ function EngineTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Setting
                   options={[{ value: "", label: t("engine.sameProvider") }, ...providers.slice(1)]} error={s.errs.reading_provider}
                   onChange={(v) => setF({ ...f, reading_provider: v || null })} />
                 <ul className="plain small muted">
-                  {data.ai_providers.map((p) => <li key={p.name}><strong>{p.label}</strong>: {t("engine.models", { vision: p.vision_model, text: p.text_model })}</li>)}
+                  {data.ai_providers.map((p) => (
+                    <li key={p.name}>
+                      <strong>{p.label}</strong>: {t("engine.models", { vision: p.vision_model, text: p.text_model })}{" "}
+                      <button type="button" className="link-btn" disabled={testing === p.name} onClick={() => runTest(p.name)}>
+                        {testing === p.name ? t("engine.testing") : t("engine.test")}
+                      </button>
+                      {tests[p.name] && (
+                        <ul className="plain ai-test">
+                          {tests[p.name].map((r) => (
+                            <li key={r.role} className={r.ok ? "ok" : "bad"}>
+                              {r.ok ? "✓" : "✕"} {t(r.role === "vision" ? "engine.testVision" : "engine.testText")} · <code>{r.model}</code>
+                              {r.ok ? ` · ${r.ms} ms` : <div className="small">{r.error}</div>}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               </>
             )}

@@ -169,7 +169,7 @@ main{min-width:0}
 </head>
 <body>
 {% if mode == 'app' %}
-<div class="bar"><a class="home" href="{{ urls.home }}">Leaflet Auditor</a><a href="{{ urls.home }}">← {{ 'المراجعات' if lang=='ar' else 'All audits' }}</a>
+<div class="bar"><a class="home" href="{{ urls.home }}">Comproof</a><a href="{{ urls.home }}">← {{ 'المراجعات' if lang=='ar' else 'All audits' }}</a>
   <span class="sp"></span>
   <a href="{{ urls.html }}">{{ 'تقرير تفاعلي' if lang=='ar' else 'Download interactive report' }}</a>
   <a href="{{ urls.pdf }}">PDF</a><a href="{{ urls.xlsx }}">Excel</a>
@@ -252,7 +252,7 @@ const L = AR ? {
 } : {
   steps:['Approved leaflet audit','Content comparison','Punctuation & typography'], stepsSub:['Scientific errors and contradictions','Every word, English and Arabic','Punctuation, spacing, digit style'],
   excluded:'Excluded from comparison', sections:'Sections', all:'All sections', pending:'Undecided', noise:'Show OCR noise', expand:'Expand all', collapse:'Collapse all',
-  shown:n=>`${n} shown`, approved:'Approved', design:'Design', map:'Leaflet map', mapD:'Design', mapA:'Approved', hint:'Each dot is a finding. Click one to jump to it.',
+  shown:n=>`${n} shown`, approved:'Approved', design:'Design', map:'Pack map', mapD:'Design', mapA:'Approved', hint:'Each dot is a finding. Click one to jump to it.',
   what:'What changed', why:'Why it matters', act:'Action', confirm:'Confirm deviation', reject:'Not a deviation', reason:'Reason (required to reject)', none:'No screenshot',
   crit:'Critical', major:'Major', minor:'Minor', info:'OCR noise', st:{pending:'Awaiting decision',confirmed:'Confirmed',rejected:'Rejected'},
   notReady:'Not ready for print', wip:'Review in progress', ready:'Ready for print', empty:'No findings match these filters.',

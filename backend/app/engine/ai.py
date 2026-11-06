@@ -100,6 +100,29 @@ class AIUnavailable(Exception):
     pass
 
 
+class AIConfigError(AIUnavailable):
+    """The provider refused the request itself (wrong model name, bad key, no access). Retrying cannot help,
+    so a run stops calling this provider after the first one."""
+
+
+def _http_error_text(provider: "Provider", model: str, code: int, raw: bytes) -> str:
+    msg = ""
+    try:
+        err = json.loads(raw.decode("utf-8", "replace"))
+        e = err.get("error", err) if isinstance(err, dict) else {}
+        msg = (e.get("message") if isinstance(e, dict) else str(e)) or ""
+    except ValueError:
+        msg = raw[:200].decode("utf-8", "replace")
+    low = msg.lower()
+    if code == 404 or "model" in low and ("not exist" in low or "not found" in low or "does not exist" in low):
+        env = provider.name.upper() if provider.name != "custom" else "CUSTOM_AI"
+        return (f"{provider.label} has no model named “{model}” for this API key and region (HTTP {code}: {msg.strip()}). "
+                f"Set {env}_VISION_MODEL / {env}_TEXT_MODEL on the server to a model your account can use.")
+    if code in (401, 403):
+        return f"{provider.label} refused the API key (HTTP {code}: {msg.strip()}). Check the key and its region."
+    return f"{provider.label} returned HTTP {code}: {msg.strip()}"
+
+
 def img_data_url(img) -> str:
     q = 90
     while True:
@@ -138,7 +161,9 @@ def chat(provider: Provider, model: str, messages: list, max_tokens: int = 1200,
             parsed = _parse_json(content)
             return {"model": out.get("model") or model, "data": parsed, "usage": out.get("usage") or {}}
         except urllib.error.HTTPError as e:
-            last = f"HTTP {e.code}: {e.read()[:300]!r}"
+            last = _http_error_text(provider, model, e.code, e.read()[:2000])
+            if e.code in (400, 401, 403, 404, 422):
+                raise AIConfigError(last)
             if e.code in (408, 409, 429, 500, 502, 503, 504, 529):
                 wait = e.headers.get("retry-after")
                 time.sleep(min(30.0, float(wait) if wait and wait.replace('.', '', 1).isdigit() else 2 ** attempt * 2))
@@ -224,3 +249,22 @@ def science(provider: Provider, eng: str, ara: str, kind: str) -> tuple[str, lis
     msg = SCIENCE_PROMPT.format(eng=eng[:60000], ara=ara[:30000], kind=kind)
     out = chat(provider, provider.text_model, [{"role": "user", "content": msg}], max_tokens=4000, timeout=240)
     return out["model"], out["data"].get("issues") or []
+
+
+# ------------------------------------------------------------------ connection test (Settings > Engine)
+def test(provider: Provider) -> list[dict]:
+    """One tiny call per model so an administrator sees at once whether the key, region and model names work."""
+    from PIL import Image
+    out = []
+    img = Image.new("RGB", (64, 24), "white")
+    for role, model, content in (
+            ("text", provider.text_model, 'Reply with the JSON {"ok": true}.'),
+            ("vision", provider.vision_model, [{"type": "text", "text": 'Reply with the JSON {"ok": true}.'},
+                                               {"type": "image_url", "image_url": {"url": img_data_url(img)}}])):
+        t0 = time.time()
+        try:
+            r = chat(provider, model, [{"role": "user", "content": content}], max_tokens=20, timeout=40)
+            out.append({"role": role, "model": r["model"], "ok": True, "ms": int((time.time() - t0) * 1000)})
+        except AIUnavailable as e:
+            out.append({"role": role, "model": model, "ok": False, "error": str(e)})
+    return out

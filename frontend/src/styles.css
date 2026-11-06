@@ -1450,3 +1450,7 @@ ul.plain { margin: 0; padding-inline-start: 18px; }
 .progressbar.fixed { display: block; margin: 8px 0 4px; }
 .progressbar.fixed i { animation: none; margin: 0; transition: width .2s linear; }
 .drop:disabled { cursor: progress; }
+.ai-test { margin: 6px 0 4px; }
+.ai-test li.ok { color: var(--ok); }
+.ai-test li.bad { color: var(--danger); }
+.ai-test li .small { color: var(--text-2); overflow-wrap: anywhere; }

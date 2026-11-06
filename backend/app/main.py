@@ -51,6 +51,7 @@ API_ROUTES = [
     Route("/api/settings/terminology", company.update_terminology, methods=["PUT"]),
     Route("/api/settings/security", company.update_security, methods=["PUT"]),
     Route("/api/settings/engine", company.update_engine, methods=["PUT"]),
+    Route("/api/settings/engine/test", company.test_ai, methods=["POST"]),
     # Artwork library
     Route("/api/files", library.upload_file, methods=["POST"]),
     Route("/api/files/{file_id}/content", library.file_content, methods=["GET"]),
