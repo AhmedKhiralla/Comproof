@@ -34,6 +34,9 @@ def _code(v: str) -> str:
 @endpoint(auth="tenant_user")
 def upload_file(call: Call):
     """Raw body upload. ?filename=... The same bytes uploaded twice share one stored copy."""
+    if not settings.storage_persistent:
+        raise ApiError(503, "no_storage", "Uploads are switched off because this server has no persistent volume: "
+                       "files would be lost at the next deploy. Attach a volume to the Comproof service in Railway.")
     filename = (call.query.get("filename") or "").strip()[:200]
     if not filename:
         raise ApiError(422, "invalid", "The file name is missing.")

@@ -32,7 +32,7 @@ colour (ΔE), barcodes, the print-house portal and line checks.
 |---|---|
 | `DATABASE_URL` | PostgreSQL 14+ connection string. Migrations run at start-up. |
 | `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `PLATFORM_ADMIN_NAME` | First platform administrator (must change the password at first sign-in). |
-| `DATA_DIR` | File store (default `/data` in the image). |
+| `DATA_DIR` | File store (default `/data`). When a Railway volume is attached, its mount path is used automatically; without one, uploads are refused so files are never silently lost. |
 | `MAX_UPLOAD_MB` | Upload limit, default 60. |
 | `ENGINE_WORKERS` | Comparisons run in parallel per instance, default 1 (OCR is CPU-bound; raise with the plan's vCPUs). |
 | `RUN_WORKER` | `false` on a web-only replica. |

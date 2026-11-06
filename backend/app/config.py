@@ -34,7 +34,13 @@ class Settings:
         os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")))
     run_migrations: bool = field(default_factory=lambda: _bool("RUN_MIGRATIONS", True))
     # Controlled file store: uploads, results and screenshots. Mount a persistent volume here.
-    data_dir: str = field(default_factory=lambda: os.environ.get("DATA_DIR", os.path.join(os.getcwd(), "data")))
+    # On Railway the attached volume's mount path wins, so files always land on the persistent disk.
+    data_dir: str = field(default_factory=lambda: os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")
+                          or os.environ.get("DATA_DIR", os.path.join(os.getcwd(), "data")))
+    # False only on Railway without a volume: uploads are refused rather than lost at the next deploy.
+    storage_persistent: bool = field(default_factory=lambda: not (
+        os.environ.get("RAILWAY_PROJECT_ID") or os.environ.get("RAILWAY_ENVIRONMENT_NAME"))
+        or bool(os.environ.get("RAILWAY_VOLUME_MOUNT_PATH")) or _bool("ALLOW_EPHEMERAL_STORAGE", False))
     max_upload_mb: int = field(default_factory=lambda: int(os.environ.get("MAX_UPLOAD_MB", "60")))
     # Comparisons run in background threads inside the web process.
     workers: int = field(default_factory=lambda: int(os.environ.get("ENGINE_WORKERS", "1")))

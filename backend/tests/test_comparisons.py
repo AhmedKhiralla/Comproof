@@ -250,3 +250,37 @@ def test_admin_who_is_also_approver_can_sign_master(server, acme):
     st, c, _ = boss.post(f"/api/artwork/{ver['id']}/sign", {"meaning": "approved_master", "email": "boss@cmpr.test",
                                                             "password": "Boss#Pass2026"})
     assert st == 200 and c["versions"][0]["status"] == "effective", c
+
+
+def test_lost_file_is_restored_by_uploading_the_same_bytes(acme):
+    """If the file store loses a file, re-uploading identical bytes restores it and the run can be retried."""
+    import os
+    from conftest import BACKEND
+    reviewer, _ = acme["reviewer"]
+    data = _pdf(DESIGN[:5] + ["Lost and restored."])
+    st, f = reviewer.upload("/api/files", "restore.pdf", data)
+    assert st == 200
+    path = next((BACKEND / "tests" / ".data").rglob(f["sha256"] + ".pdf"))
+    os.chmod(path, 0o640)
+    os.remove(path)
+    body = {"site_id": acme["site"]["id"], "title": "Lost file", "component_id": acme["component"]["id"],
+            "test_file_id": f["id"], "languages": ["eng"]}
+    st, c, _ = reviewer.post("/api/comparisons", body)
+    assert st == 200, c
+    s = _wait(reviewer, c["id"])
+    assert s["status"] == "failed" and "Upload the same file again" in (s.get("progress") or ""), s
+    st, g = reviewer.upload("/api/files", "restore again.pdf", data)
+    assert st == 200 and g["sha256"] == f["sha256"]
+    st, _, _ = reviewer.post(f"/api/comparisons/{c['id']}/retry")
+    assert st == 200
+    assert _wait(reviewer, c["id"])["status"] == "review"
+
+
+def test_uploads_refused_on_railway_without_volume(monkeypatch):
+    from app.config import Settings
+    monkeypatch.setenv("RAILWAY_PROJECT_ID", "p1")
+    monkeypatch.delenv("RAILWAY_VOLUME_MOUNT_PATH", raising=False)
+    assert Settings().storage_persistent is False
+    monkeypatch.setenv("RAILWAY_VOLUME_MOUNT_PATH", "/vol")
+    s = Settings()
+    assert s.storage_persistent is True and s.data_dir == "/vol"

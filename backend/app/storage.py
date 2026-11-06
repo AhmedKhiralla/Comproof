@@ -70,7 +70,8 @@ def verify(key: str, sha: str) -> str:
     """Return the path after checking the bytes still match the recorded SHA-256."""
     p = path_of(key)
     if not os.path.exists(p):
-        raise StorageError("The stored file is missing.")
+        raise StorageError("The stored file is missing from the file store. Upload the same file again to restore it "
+                           "(it is accepted only if its SHA-256 matches the record), then run again.")
     h = hashlib.sha256()
     with open(p, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 20), b""):

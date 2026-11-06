@@ -21,7 +21,7 @@ logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"),
 log = logging.getLogger("comproof")
 
 API_ROUTES = [
-    Route("/api/health", lambda r: JSONResponse({"status": "ok"}), methods=["GET"]),
+    Route("/api/health", lambda r: JSONResponse({"status": "ok", "storage": "persistent" if settings.storage_persistent else "ephemeral"}), methods=["GET"]),
     # Authentication and personal settings
     Route("/api/auth/login", auth.login, methods=["POST"]),
     Route("/api/auth/logout", auth.logout, methods=["POST"]),
@@ -131,6 +131,9 @@ async def lifespan(app):
         if applied:
             log.info("Applied migrations: %s", ", ".join(applied))
         bootstrap_platform_admin()
+    log.info("File store: %s (%s)", settings.data_dir, "persistent" if settings.storage_persistent else "NOT persistent")
+    if not settings.storage_persistent:
+        log.warning("No Railway volume is attached: uploads are refused until one is mounted.")
     from .worker import start
     start()
     yield
