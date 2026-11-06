@@ -34,14 +34,25 @@ export interface UploadedFile {
   id: string; sha256: string; filename: string; mime: string; size_bytes: number; page_count: number | null; doc_kind: string;
 }
 
-async function uploadFile(file: File): Promise<UploadedFile> {
-  const res = await fetch("/api/files" + qs({ filename: file.name }), {
-    method: "POST", body: file, credentials: "same-origin",
-    headers: { "X-Requested-With": "comproof", "Content-Type": "application/octet-stream" },
+/** Upload with progress (fetch cannot report upload progress, XMLHttpRequest can). */
+function uploadFile(file: File, onProgress: (sent: number, total: number) => void): Promise<UploadedFile> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/files" + qs({ filename: file.name }));
+    xhr.withCredentials = true;
+    xhr.setRequestHeader("X-Requested-With", "comproof");
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded, e.total); };
+    xhr.onload = () => {
+      let data: any = {};
+      try { data = JSON.parse(xhr.responseText || "{}"); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data as UploadedFile);
+      else reject(new ApiError(xhr.status, data?.error?.code ?? "server_error", data?.error?.message ?? xhr.statusText));
+    };
+    xhr.onerror = () => reject(new ApiError(0, "network", "The connection was interrupted. Check your internet and try again."));
+    xhr.ontimeout = xhr.onerror;
+    xhr.send(file);
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? "server_error", data?.error?.message ?? res.statusText);
-  return data as UploadedFile;
 }
 
 export function fileSize(n: number) {
@@ -57,11 +68,20 @@ export function FileDrop({ label, hint, value, onChange, error }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const [prog, setProg] = useState<{ sent: number; total: number; started: number } | null>(null);
   const take = async (file: File | undefined) => {
     if (!file) return;
     setBusy(true); setErr(null);
-    try { onChange(await uploadFile(file)); } catch (e) { setErr(errorText(e, t)); } finally { setBusy(false); }
+    const started = Date.now();
+    setProg({ sent: 0, total: file.size, started });
+    try { onChange(await uploadFile(file, (sent, total) => setProg({ sent, total, started }))); }
+    catch (e) { setErr(errorText(e, t)); }
+    finally { setBusy(false); setProg(null); }
   };
+  const pct = prog && prog.total ? Math.floor((prog.sent / prog.total) * 100) : 0;
+  const secs = prog ? (Date.now() - prog.started) / 1000 : 0;
+  const rate = prog && secs > 1 ? prog.sent / secs : 0;
+  const left = rate > 0 && prog ? Math.max(0, Math.round((prog.total - prog.sent) / rate)) : null;
   const onDrop = (e: DragEvent) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files?.[0]); };
   return (
     <div className="field">
@@ -80,9 +100,21 @@ export function FileDrop({ label, hint, value, onChange, error }: {
         </div>
       ) : (
         <button type="button" className={`drop ${over ? "over" : ""}`} onClick={() => input.current?.click()}
-          onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} aria-busy={busy}>
+          onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={onDrop} aria-busy={busy} disabled={busy}>
           <LuFileUp aria-hidden />
-          <span><strong>{busy ? t("cp.uploading") : t("cp.dropFile")}</strong><span className="small muted">{hint ?? t("cp.fileTypes")}</span></span>
+          <span className="grow">
+            <strong>{busy ? (pct >= 100 ? t("cp.checking") : `${t("cp.uploading")} ${pct}%`) : t("cp.dropFile")}</strong>
+            {busy && prog ? (
+              <>
+                <span className="progressbar fixed"><i style={{ width: `${pct}%` }} /></span>
+                <span className="small muted">
+                  {fileSize(prog.sent)} / {fileSize(prog.total)}
+                  {rate > 0 && ` · ${fileSize(rate)}/s`}
+                  {left !== null && pct < 100 && ` · ${t("cp.secondsLeft", { n: left })}`}
+                </span>
+              </>
+            ) : <span className="small muted">{hint ?? t("cp.fileTypes")}</span>}
+          </span>
         </button>
       )}
       <input ref={input} type="file" hidden accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.docx"

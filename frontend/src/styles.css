@@ -1447,3 +1447,6 @@ ul.plain { margin: 0; padding-inline-start: 18px; }
 .auth-visual .legend i.lg-sig { background: #5cc995; }
 @media (prefers-reduced-motion: reduce) { .pv-line, .pv-sign, .pulse, .progressbar i { animation: none; } }
 .rep-row .meta .lowconf { color: var(--sev-major); font-weight: 600; }
+.progressbar.fixed { display: block; margin: 8px 0 4px; }
+.progressbar.fixed i { animation: none; margin: 0; transition: width .2s linear; }
+.drop:disabled { cursor: progress; }
