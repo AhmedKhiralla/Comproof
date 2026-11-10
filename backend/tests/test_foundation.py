@@ -232,3 +232,36 @@ def test_audit_chain_with_concurrent_writers(db_url, two_companies):
     checked, bad = conn.execute("SELECT checked, first_bad_id FROM cp_audit_verify(%s)", (tenant,)).fetchone()
     assert checked == 159 and bad is not None and bad > victim
     conn.close()
+
+
+def test_audit_verify_accepts_entries_from_the_old_race_only(db_url, two_companies):
+    """Pre-1.2.1 data: an entry linked to a later-numbered one (the race) verifies; anything linking after it does not."""
+    import uuid as _uuid
+    tenant = str(_uuid.uuid4())
+    conn = psycopg.connect(db_url, autocommit=True)
+    conn.execute("SELECT set_config('app.is_system', 'true', false)")
+    conn.execute("ALTER TABLE audit_log DISABLE TRIGGER audit_log_chain")
+    try:
+        ids = [conn.execute("SELECT nextval('audit_log_id_seq')").fetchone()[0] for _ in range(4)]
+
+        def put(i, prev):
+            conn.execute("INSERT INTO audit_log (id, occurred_at, tenant_id, user_name, action, entity) "
+                         "VALUES (%s, '2026-01-01T00:00:00Z', %s, 'w', 'RUN_STARTED', 'comparisons')", (i, tenant))
+            conn.execute("ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update")
+            conn.execute("UPDATE audit_log a SET prev_hash = %s, row_hash = cp_audit_hash(%s, cp_audit_payload(a)) WHERE id = %s",
+                         (prev, prev, i))
+            conn.execute("ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update")
+            return conn.execute("SELECT row_hash FROM audit_log WHERE id = %s", (i,)).fetchone()[0]
+        h0 = put(ids[0], None)
+        h2 = put(ids[2], h0)      # linked first
+        put(ids[1], h2)           # the race: lower id, linked to the later entry
+        put(ids[3], h2)           # the next writer links to the highest id
+        assert conn.execute("SELECT checked, first_bad_id FROM cp_audit_verify(%s)", (tenant,)).fetchone() == (4, None)
+        h4 = conn.execute("SELECT row_hash FROM audit_log WHERE id = %s", (ids[1],)).fetchone()[0]
+        extra = conn.execute("SELECT nextval('audit_log_id_seq')").fetchone()[0]
+        put(extra, h4)            # something linking after the side entry is a fork
+        assert conn.execute("SELECT first_bad_id FROM cp_audit_verify(%s)", (tenant,)).fetchone()[0] is not None
+    finally:
+        conn.execute("ALTER TABLE audit_log ENABLE TRIGGER audit_log_chain")
+        conn.execute("ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update")
+        conn.close()
