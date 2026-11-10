@@ -38,3 +38,18 @@ def test_arabic_numbers_from_ai_reading_match_western_numbers():
     toks = compare.tokens_from_regions  # noqa: F841 (import check)
     design = " ".join(w.text for w in ws)
     assert compare._numbers(design) == compare._numbers("1 من كل 10 أشخاص والجرعة 1.25 مجم") == ["1.25", "10"]
+
+
+def test_added_text_the_ai_reads_on_the_approved_image_is_not_a_deviation():
+    added = "قم بتقشير كلا جانبي الغلاف برفق لفصلهما عند علامة السهم"
+    f = compare.Finding("C108", 2, "ara", "added", "critical", "Added in design", "", added)
+    f.ai = {"verdict": "real_difference", "impact": "major", "approved_reads": "٢ قم بتقشير كلا الغلاف برفق لفصلهما عند علامة السهم.",
+            "design_reads": "٢ " + added, "explanation": "..."}
+    pipeline.apply_review(f)
+    assert f.severity == "minor" and f.ai["verdict"] == "unclear"
+    g = compare.Finding("C9", 2, "eng", "added", "major", "Added", "",
+                        "Ergotamine derivatives: exacerbation of peripheral circulatory disturbances")
+    g.ai = {"verdict": "real_difference", "approved_reads": "Sulfonylureas: increased hypoglycaemic effect",
+            "design_reads": g.des_text}
+    pipeline.apply_review(g)
+    assert g.severity == "major" and g.ai["verdict"] == "real_difference"   # genuinely added text stays

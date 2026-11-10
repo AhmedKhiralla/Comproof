@@ -431,9 +431,27 @@ def apply_review(f) -> None:
             a["verdict"] = "unclear"
             a["explanation"] = ("The AI called this a misreading, but its own readings of the two images differ; "
                                 "check it by eye. " + str(a.get("explanation", ""))).strip()
+    elif v == "real_difference" and f.kind in ("added", "missing") and _coverage(
+            f.des_text if f.kind == "added" else f.ref_text, ra if f.kind == "added" else rd, f.lang) >= 0.6:
+        # "Added" text that the AI itself reads on the approved image (or "missing" text it reads on the new one)
+        # is a line-matching problem, not a deviation: keep it open for a person, at minor.
+        side = "approved" if f.kind == "added" else "new"
+        a["verdict"] = "unclear"
+        a["explanation"] = (f"Most of this text is also in the AI's reading of the {side} image, so it is probably "
+                            "there in both files and the lines were matched wrongly; check it by eye. "
+                            + str(a.get("explanation", ""))).strip()
+        if f.severity in ("critical", "major"):
+            f.severity = "minor"
     elif v == "real_difference" and f.severity == "info":
         f.severity = "minor"     # the engine thought it was noise; a person should look
     f.ai = a
+
+
+def _coverage(flagged: str, other: str, lang: str) -> float:
+    """Share of the flagged words that also appear in the other side's reading."""
+    words = [t for w in (flagged or "").split() for t in compare.norm_word(w, lang) if len(t) > 1]
+    pool = {t for w in (other or "").split() for t in compare.norm_word(w, lang)}
+    return sum(1 for w in words if w in pool) / len(words) if len(words) >= 4 else 0.0
 
 
 def reread(ref, des, f) -> str:
