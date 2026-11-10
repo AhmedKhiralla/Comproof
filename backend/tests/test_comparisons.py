@@ -284,3 +284,35 @@ def test_uploads_refused_on_railway_without_volume(monkeypatch):
     monkeypatch.setenv("RAILWAY_VOLUME_MOUNT_PATH", "/vol")
     s = Settings()
     assert s.storage_persistent is True and s.data_dir == "/vol"
+
+
+def test_review_of_draft_approved_material_without_test_file(acme):
+    """Level 1 on the approved material alone: a draft version can be reviewed before an approver signs it."""
+    editor, _ = acme["editor"]
+    reviewer, _ = acme["reviewer"]
+    faulty = [l.replace("contains 2.5 mg", "contains 5 mg") for l in APPROVED] + ["Tablets must be swallowed whole."]
+    st, f = editor.upload("/api/files", "draft v02.pdf", _pdf(faulty))
+    assert st == 200
+    st, c, _ = editor.post(f"/api/components/{acme['component']['id']}/artwork", {"version": "02", "file_id": f["id"]})
+    draft = next(v for v in c["versions"] if v["version"] == "02")
+    assert draft["status"] == "draft"
+    body = {"site_id": acme["site"]["id"], "title": "Review of draft v02", "purpose": "master_review",
+            "component_id": acme["component"]["id"], "artwork_version_id": draft["id"], "languages": ["eng"]}
+    st, err, _ = reviewer.post("/api/comparisons", dict(body, purpose="proof"))
+    assert st == 422 and "test_file_id" in err["error"]["fields"]          # a comparison still needs a test file
+    st, cm, _ = reviewer.post("/api/comparisons", body)
+    assert st == 200, cm
+    assert _wait(reviewer, cm["id"])["status"] == "review"
+    st, d, _ = reviewer.get(f"/api/comparisons/{cm['id']}")
+    res = d["result"]
+    assert d["comparison"]["test_file_id"] is None if "comparison" in d else d["test_file_id"] is None
+    assert res["review_only"] and res["design"]["pages"] == 0
+    steps = {x["step"] for x in res["findings"]}
+    assert steps <= {1, 5, 7} and 1 in steps, steps
+    lvl1 = " | ".join(f"{x['title']} {x['explanation']}" for x in res["findings"] if x["step"] == 1)
+    assert "2.5" in lvl1 and "5 mg" in lvl1, lvl1                            # strength contradiction found
+    assert all(x["des_loc"] == [] for x in res["findings"])
+    st, pdfb, _ = reviewer.get(f"/api/comparisons/{cm['id']}/export.pdf", raw=True)
+    assert st == 200 and pdfb[:4] == b"%PDF"
+    st, lst, _ = reviewer.get("/api/comparisons")
+    assert any(x["id"] == cm["id"] and x["test_filename"] is None for x in lst["items"])

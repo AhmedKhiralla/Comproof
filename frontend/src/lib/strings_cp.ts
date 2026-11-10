@@ -72,6 +72,13 @@ export const cpEn = {
 
   "purpose.proof": "Artwork proof",
   "purpose.supplier_proof": "Print-house proof",
+  "purpose.master_review": "Review of approved material (Level 1, no test file)",
+  "review.button": "Review text",
+  "review.start": "Start review",
+  "review.buttonHint": "Level 1 review of this version on its own: strengths, dosage form, consistency, English vs Arabic, barcodes, text size and Braille.",
+  "review.titleSuffix": "approved text review",
+  "review.noTest": "Approved material only (no test file)",
+  "review.noTestNeeded": "No test file is needed: Comproof reviews the approved material on its own (Level 1, plus barcode validity, text size, Braille and dieline when they are switched on).",
   "purpose.printed_sample": "Printed sample",
 
   "ver.draft": "Draft",
@@ -560,6 +567,13 @@ export const cpAr: Record<keyof typeof cpEn, string> = {
 
   "purpose.proof": "بروفة تصميم",
   "purpose.supplier_proof": "بروفة المطبعة",
+  "purpose.master_review": "مراجعة المادة المعتمدة (المستوى ١، دون ملف اختبار)",
+  "review.button": "مراجعة النص",
+  "review.start": "بدء المراجعة",
+  "review.buttonHint": "مراجعة المستوى ١ لهذا الإصدار وحده: التركيزات، الشكل الصيدلي، الاتساق، الإنجليزية مقابل العربية، الباركود، حجم الخط وبرايل.",
+  "review.titleSuffix": "مراجعة النص المعتمد",
+  "review.noTest": "المادة المعتمدة فقط (دون ملف اختبار)",
+  "review.noTestNeeded": "لا حاجة لملف اختبار: يراجع Comproof المادة المعتمدة وحدها (المستوى ١، مع صحة الباركود وحجم الخط وبرايل وخط القطع عند تفعيلها).",
   "purpose.printed_sample": "عينة مطبوعة",
 
   "ver.draft": "مسودة",

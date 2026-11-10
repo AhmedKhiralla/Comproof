@@ -1,5 +1,5 @@
 // One comparison: live progress while it runs, then the interactive report with decisions and signatures.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   LuChevronLeft, LuChevronRight, LuDownload, LuFileSpreadsheet, LuFileText, LuGlobe, LuLockKeyhole, LuMinus, LuPlus,
   LuRotateCcw, LuShieldCheck, LuShieldX, LuX,
@@ -29,6 +29,7 @@ interface Result {
   reading_order: Record<string, { similarity: number; approved_words: number; design_words: number }>;
   screenshots: Record<string, string>; seconds: number;
   settings?: { text?: boolean };
+  review_only?: boolean;
   checks?: { colour?: ColourRes; barcodes?: BarcodeRes; graphics?: { differences: number; notes: string[] }; print?: PrintRes };
 }
 type Lab = { L: number; a: number; b: number };
@@ -47,7 +48,7 @@ interface Detail {
   component_id: string | null; supplier: string | null; reference_no: string | null; created_at: string; finished_at: string | null;
   created_by_name: string; result_sha256: string | null; engine_version: string | null;
   files: { reference: { id: string; filename: string; sha256: string; page_count: number; doc_kind: string; size_bytes: number };
-           test: { id: string; filename: string; sha256: string; page_count: number; doc_kind: string; size_bytes: number } };
+    test: { id: string; filename: string; sha256: string; page_count: number; doc_kind: string; size_bytes: number } | null };
   artwork?: { version: string; status: string };
   result: Result | null; decisions: Record<string, Decision>; decision_history: (Decision & { id: number; finding_id: string })[];
   signatures: Sig[]; approval_blockers: string[];
@@ -55,6 +56,7 @@ interface Detail {
 }
 
 const SEVS: Sev[] = ["critical", "major", "minor", "info"];
+const ReviewOnly = createContext(false);     // review of the approved material: no test side to show
 const isAr = (s: string) => /[؀-ۿ]/.test(s || "");
 
 // ------------------------------------------------------------------ running / failed
@@ -147,7 +149,7 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
   const { t } = useI18n();
   const state = d?.decision ?? "pending";
   const peek = (f.segments || []).filter((s) => s[0] !== "eq").map((s) => (s[0] === "del" ? "− " : "+ ") + s[1]).join("   ") || f.ref_text || f.des_text;
-  const two = f.step !== 1;
+  const two = f.step !== 1 && !useContext(ReviewOnly);
   return (
     <article className={`rep-card sev-${f.severity} ${open ? "open" : ""} ${active ? "active" : ""}`} id={`f-${f.id}`}>
       <button type="button" className="rep-row" aria-expanded={open} onClick={onToggle}>
@@ -219,7 +221,7 @@ function Viewer({ cid, res, f, onClose, onStep }: { cid: string; res: Result; f:
         <Button size="sm" iconOnly icon={<LuPlus />} aria-label={t("rep.zoomIn")} onClick={() => setZoom((v) => Math.min(4, v * 1.35))} />
         <Button size="sm" variant="primary" icon={<LuX />} onClick={onClose}>{t("common.close")}</Button>
       </div>
-      <div className={`vpanes ${f.step === 1 ? "one" : ""}`}>{pane("approved")}{f.step !== 1 && pane("design")}</div>
+      <div className={`vpanes ${f.step === 1 || res.review_only ? "one" : ""}`}>{pane("approved")}{f.step !== 1 && !res.review_only && pane("design")}</div>
     </div>
   );
 }
@@ -252,15 +254,15 @@ function ViewerPane({ doc, cid, page, W, H, z, boxes, where }: {
 
 function LeafletMap({ cid, res, items, active, onPick }: { cid: string; res: Result; items: Finding[]; active: string | null; onPick: (id: string) => void }) {
   const { t } = useI18n();
-  const [doc, setDoc] = useState<"design" | "approved">("design");
+  const [doc, setDoc] = useState<"design" | "approved">(res.review_only ? "approved" : "design");
   const sizes = res[doc].sizes;
   return (
     <aside className="rep-map" aria-label={t("rep.map")}>
       <h3>{t("rep.map")}</h3>
-      <div className="seg" role="group">
+      {!res.review_only && <div className="seg" role="group">
         <button type="button" aria-pressed={doc === "design"} onClick={() => setDoc("design")}>{t("rep.test")}</button>
         <button type="button" aria-pressed={doc === "approved"} onClick={() => setDoc("approved")}>{t("rep.approved")}</button>
-      </div>
+      </div>}
       <div className="pages">
         {sizes.map(([W, H], p) => (
           <div className="pg" key={p}>
@@ -289,7 +291,7 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
   const res = d.result!;
   const F = res.findings;
   const steps = useMemo(() => {
-    const ks = new Set<number>(res.settings?.text === false ? [] : [1, 2, 3]);
+    const ks = new Set<number>(res.review_only ? [1] : res.settings?.text === false ? [] : [1, 2, 3]);
     F.forEach((f) => ks.add(f.step));
     const c = res.checks ?? {};
     if (c.colour) ks.add(4); if (c.barcodes) ks.add(5); if (c.graphics) ks.add(6); if (c.print) ks.add(7);
@@ -385,8 +387,9 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
           <div className="files">
             <span><b className="ref">{t("rep.approved")}</b> {d.files.reference.filename}{d.artwork ? ` · v${d.artwork.version}` : ""}
               <span className="subtle"> · {d.files.reference.page_count} {t("cp.pages")} · {fileSize(d.files.reference.size_bytes)}</span></span>
-            <span><b className="tst">{t("rep.test")}</b> {d.files.test.filename}
+            {d.files.test ? <span><b className="tst">{t("rep.test")}</b> {d.files.test.filename}
               <span className="subtle"> · {d.files.test.page_count} {t("cp.pages")} · {fileSize(d.files.test.size_bytes)}</span></span>
+              : <span className="subtle">{t("review.noTest")}</span>}
           </div>
         </div>
         <div className={`verdict ${verdict.cls}`}>
@@ -539,11 +542,11 @@ export function ComparisonView({ comparisonId }: { comparisonId: string }) {
   return (
     <div className="report">
       <nav className="crumbs small"><Link to="/comparisons">{t("cmp.title")}</Link> / <span className="mono-id">{data.number}</span></nav>
-      {data.result ? <Report d={data} setD={setData} /> : (
+      {data.result ? <ReviewOnly.Provider value={!!data.result.review_only}><Report d={data} setD={setData} /></ReviewOnly.Provider> : (
         <>
           <h1 className="rep-title" dir="auto">{data.title}</h1>
           <div className="row wrap" style={{ marginBottom: 12 }}><StatusBadge status={data.status} /><span className="small muted mono-id">{data.number}</span>
-            <Badge>{data.files.reference.filename}</Badge><Badge>{data.files.test.filename}</Badge></div>
+            <Badge>{data.files.reference.filename}</Badge>{data.files.test && <Badge>{data.files.test.filename}</Badge>}</div>
           <Progress d={data} onChange={reload} />
         </>
       )}

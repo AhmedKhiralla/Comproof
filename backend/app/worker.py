@@ -40,7 +40,7 @@ def _claim() -> dict | None:
         tx.apply(_ctx(row["tenant_id"]))
         c = tx.one(
             "SELECT c.*, rf.storage_key AS ref_key, rf.sha256 AS ref_sha, tf.storage_key AS test_key, tf.sha256 AS test_sha"
-            "  FROM comparisons c JOIN files rf ON rf.id = c.reference_file_id JOIN files tf ON tf.id = c.test_file_id"
+            "  FROM comparisons c JOIN files rf ON rf.id = c.reference_file_id LEFT JOIN files tf ON tf.id = c.test_file_id"
             " WHERE c.id = %s", row["id"])
         tx.x("UPDATE comparisons SET status = 'running', started_at = now(), progress = 'Starting', result_sha256 = NULL,"
              " result_summary = NULL WHERE id = %s", c["id"])
@@ -65,7 +65,7 @@ def _summary(res: dict) -> dict:
         if f["severity"] != "info":
             out["total"] += 1
     out["seconds"] = res.get("seconds")
-    out["pages"] = {"approved": res["approved"]["pages"], "test": res["design"]["pages"]}
+    out["pages"] = {"approved": res["approved"]["pages"], "test": (res.get("design") or {}).get("pages", 0)}
     return out
 
 
@@ -90,7 +90,7 @@ def run_one(c: dict) -> None:
     storage.clear_work_dir(tenant, c["id"])
     try:
         ref = storage.verify(c["ref_key"], c["ref_sha"])
-        test = storage.verify(c["test_key"], c["test_sha"])
+        test = storage.verify(c["test_key"], c["test_sha"]) if c["test_key"] else None
         run_settings = dict(c["settings"])
         colour_cfg = (run_settings.get("checks") or {}).get("colour")
         if colour_cfg:

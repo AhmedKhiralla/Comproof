@@ -177,3 +177,43 @@ def print_check(des, des_regions, des_path: str, settings: dict, n: int, progres
             n += 1
             findings.append(f)
     return findings, section, n
+
+
+def to_reference(findings: list) -> list:
+    """Checks written for the test file, run on the approved file: move their locations to the approved side."""
+    for f in findings:
+        if f.des_loc and not f.ref_loc:
+            f.ref_loc, f.des_loc = f.des_loc, []
+            f.ref_text, f.des_text = f.des_text or f.ref_text, ""
+    return findings
+
+
+def barcode_single(ref, product: dict, n: int, progress):
+    """Approved material on its own: every barcode must decode with valid data and the product's GTIN."""
+    from . import barcodes
+    progress("Level 5: reading barcodes on the approved material")
+    codes = [barcodes.describe(c) for c in barcodes.decode_document(ref)]
+    findings, rows = [], []
+    gtin = product.get("gtin")
+    for c in codes:
+        problems = list(c.get("problems", []))
+        sev = "critical" if any("check digit" in p for p in problems) else "major"
+        if gtin and c.get("gtin") and barcodes.gtin14(c["gtin"]) != barcodes.gtin14(gtin):
+            problems.append(f"GTIN {c['gtin']} differs from the product record ({gtin}).")
+            sev = "critical"
+        rows.append({"symbology": c["symbology"], "approved": c["text"], "test": None, "gtin": c.get("gtin"),
+                     "fields_approved": c.get("fields"), "status": "invalid" if problems else "valid"})
+        if problems:
+            findings.append(_finding(f"B{n}", STEP_BARCODE, "barcode", sev, f"{c['symbology']} barcode data is not valid",
+                                     ref_text=c["text"], ref_loc=[(c["page"], [int(v) for v in c["box"]])],
+                                     section=c["symbology"], category="Barcodes", explanation=" ".join(problems),
+                                     action="Correct the barcode before the artwork is approved."))
+            n += 1
+    if gtin and not codes:
+        findings.append(_finding(f"B{n}", STEP_BARCODE, "barcode", "minor", "No barcode found on the approved material",
+                                 section="Barcodes", category="Barcodes",
+                                 explanation=f"The product has GTIN {gtin} but no barcode was read on this file.",
+                                 action="Check whether this packaging type should carry a barcode."))
+        n += 1
+    return findings, {"decoders": barcodes.decoders(), "approved": len(codes), "test": 0, "rows": rows,
+                      "single": True}, n

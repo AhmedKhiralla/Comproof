@@ -1,6 +1,6 @@
 // Artwork library: products, their packaging components and approved artwork versions.
 import { useState } from "react";
-import { LuDownload, LuFilePlus2, LuLibrary, LuPencil, LuPlus, LuShieldCheck, LuUndo2 } from "react-icons/lu";
+import { LuDownload, LuFilePlus2, LuFileSearch, LuLibrary, LuPencil, LuPlus, LuShieldCheck, LuUndo2 } from "react-icons/lu";
 import { FileDrop, SignDialog, fileSize, type Meaning, type UploadedFile } from "../components/cp";
 import {
   Badge, Button, Empty, LoadError, LoadingRows, Notice, PageHead, SelectField, Sheet, Switch, TextField,
@@ -9,7 +9,7 @@ import {
 import { get, patch, post, qs } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { Link, navigate } from "../lib/router";
-import { usePerms } from "../lib/session";
+import { usePerms, useSession } from "../lib/session";
 import type { StringKey } from "../lib/strings";
 import { ShadeSection, type ShadeSet } from "./Shades";
 
@@ -281,16 +281,31 @@ function VersionSheet({ component, onClose, onSaved }: { component: ComponentDet
 
 export function ComponentPage({ componentId }: { componentId: string }) {
   const { t, dateTime, date } = useI18n();
-  const { has } = usePerms();
+  const { has, startAt, siteId } = usePerms();
+  const { me } = useSession();
   const toast = useToast();
   const { data, error, reload, setData } = useLoad(() => get<ComponentDetail>(`/api/components/${componentId}`), [componentId]);
   const [edit, setEdit] = useState(false);
   const [addVer, setAddVer] = useState(false);
   const [signing, setSigning] = useState<{ v: Version; meaning: Meaning } | null>(null);
+  const [reviewing, setReviewing] = useState<string | null>(null);
   if (error) return <div className="panel"><LoadError error={error} onRetry={reload} /></div>;
   if (!data) return <div className="panel"><div className="panel-body"><div className="skeleton" style={{ width: "40%" }} /></div></div>;
   const approver = has("approver");
   const tone = { draft: "brand", effective: "ok", superseded: undefined, withdrawn: "danger" } as const;
+  const reviewSite = siteId && startAt(siteId) ? siteId : (me?.sites ?? []).find((s) => startAt(s.id))?.id ?? null;
+  const review = async (v: Version) => {
+    if (!reviewSite) return;
+    setReviewing(v.id);
+    try {
+      const r = await post<{ id: string }>("/api/comparisons", {
+        site_id: reviewSite, purpose: "master_review", component_id: data.id, artwork_version_id: v.id,
+        title: `${data.product_code} ${data.code} v${v.version} · ${t("review.titleSuffix")}`,
+        languages: data.languages.map((l) => (l === "ar" ? "ara" : "eng")),
+      });
+      navigate(`/comparisons/${r.id}`);
+    } catch (e) { toast(errorText(e, t)); setReviewing(null); }
+  };
   return (
     <>
       <nav className="crumbs small"><Link to="/products">{t("lib.title")}</Link> / <Link to={`/products/${data.product_id}`}>{data.product_code}</Link> / <span className="mono-id">{data.code}</span></nav>
@@ -316,6 +331,8 @@ export function ComponentPage({ componentId }: { componentId: string }) {
                   {v.effective_from && <span className="small muted">{t("lib.ver.from", { d: date(v.effective_from) })}</span>}
                   <span className="spacer" />
                   <a className="btn sm ghost" href={`/api/files/${v.file_id}/content`}><LuDownload aria-hidden />{t("lib.ver.download")}</a>
+                  {reviewSite && (v.status === "draft" || v.status === "effective") &&
+                    <Button size="sm" icon={<LuFileSearch />} busy={reviewing === v.id} onClick={() => review(v)} title={t("review.buttonHint")}>{t("review.button")}</Button>}
                   {approver && v.status === "draft" && <Button size="sm" variant="primary" icon={<LuShieldCheck />} onClick={() => setSigning({ v, meaning: "approved_master" })}>{t("lib.ver.approve")}</Button>}
                   {approver && (v.status === "draft" || v.status === "effective") && <Button size="sm" variant="ghost" icon={<LuUndo2 />} onClick={() => setSigning({ v, meaning: "withdrawn" })}>{t("lib.ver.withdraw")}</Button>}
                 </div>

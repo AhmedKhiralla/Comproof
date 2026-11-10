@@ -31,7 +31,7 @@ SELECT c.id, c.number, c.title, c.purpose, c.status, c.progress, c.site_id, s.co
   FROM comparisons c
   JOIN sites s ON s.id = c.site_id
   JOIN files rf ON rf.id = c.reference_file_id
-  JOIN files tf ON tf.id = c.test_file_id
+  LEFT JOIN files tf ON tf.id = c.test_file_id
   LEFT JOIN components comp ON comp.id = c.component_id
   LEFT JOIN products p ON p.id = comp.product_id
   LEFT JOIN users u ON u.id = c.created_by
@@ -90,10 +90,11 @@ def _features(call: Call) -> dict:
 class ComparisonIn(BaseModel):
     site_id: str
     title: str = Field(min_length=1, max_length=200)
-    purpose: Literal["proof", "printed_sample", "supplier_proof"] = "proof"
+    purpose: Literal["proof", "printed_sample", "supplier_proof", "master_review"] = "proof"
     component_id: str | None = None
     reference_file_id: str | None = None
-    test_file_id: str
+    artwork_version_id: str | None = None      # review a specific version (e.g. a draft before it is approved)
+    test_file_id: str | None = None            # none for a review of the reference on its own
     supplier: str | None = Field(default=None, max_length=120)
     reference_no: str | None = Field(default=None, max_length=80)
     kind: Literal["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"] | None = None
@@ -122,6 +123,12 @@ def create_comparison(call: Call):
     if not can_start(call, b.site_id):
         raise ApiError(403, "forbidden", "Reviewer or artwork editor access at this site is required to start a comparison.")
     tx = call.tx
+    review = b.purpose == "master_review"
+    if review and b.test_file_id:
+        raise ApiError(422, "invalid", "Some fields need attention.",
+                       fields={"test_file_id": "A review of the approved material has no test file."})
+    if not review and not b.test_file_id:
+        raise ApiError(422, "invalid", "Some fields need attention.", fields={"test_file_id": "Upload the file to check."})
     kind, artwork_id, ref_id, strengths = b.kind, None, b.reference_file_id, ""
     product_name, gtin, shade_id = "", None, b.shade_set_id
     if b.component_id:
@@ -137,6 +144,16 @@ def create_comparison(call: Call):
         strengths = comp["strengths"] or ""
         product_name, gtin = comp["product_name"] or "", comp["gtin"]
         shade_id = shade_id or (str(comp["shade_set_id"]) if comp["shade_set_id"] else None)
+        if b.artwork_version_id and not ref_id:
+            v = tx.one("SELECT id, file_id, status FROM artwork_versions WHERE id = %s::uuid AND component_id = %s::uuid",
+                       b.artwork_version_id, b.component_id)
+            if not v or v["status"] == "withdrawn":
+                raise ApiError(422, "invalid", "Some fields need attention.",
+                               fields={"artwork_version_id": "Choose a version of this component that is not withdrawn."})
+            if v["status"] != "effective" and not review:
+                raise ApiError(422, "invalid", "Some fields need attention.",
+                               fields={"artwork_version_id": "Only the effective master can be the reference of a comparison."})
+            ref_id, artwork_id = str(v["file_id"]), v["id"]
         if not ref_id:
             if not comp["artwork_id"]:
                 raise ApiError(422, "no_master", "This component has no effective approved artwork. Upload the approved file instead.",
@@ -145,14 +162,20 @@ def create_comparison(call: Call):
     if not ref_id:
         raise ApiError(422, "invalid", "Some fields need attention.", fields={"reference_file_id": "Upload the approved file."})
     for fid, field in ((ref_id, "reference_file_id"), (b.test_file_id, "test_file_id")):
-        if not tx.val("SELECT 1 FROM files WHERE id = %s::uuid", fid):
+        if fid and not tx.val("SELECT 1 FROM files WHERE id = %s::uuid", fid):
             raise ApiError(422, "invalid", "Some fields need attention.", fields={field: "File was not found."})
     if ref_id == b.test_file_id:
         raise ApiError(422, "invalid", "Some fields need attention.", fields={"test_file_id": "The two files are the same file."})
     t = tx.one("SELECT features, engine FROM tenants WHERE id = %s", call.tenant_id)
     f, eng = effective_features(t["features"]), effective_engine(t["engine"])
-    test_kind = tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid", b.test_file_id)
-    want_colour = b.colour and f["check_colour"]
+    test_kind = tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid", b.test_file_id) if b.test_file_id else None
+    if review and tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid", ref_id) == "spectro":
+        raise ApiError(422, "invalid", "Some fields need attention.",
+                       fields={"reference_file_id": "Choose the approved artwork, not a measurement file."})
+    if review and not f["step1_master_audit"]:
+        raise ApiError(422, "invalid", "Level 1 (approved text audit) is switched off for your company "
+                       "(Settings → Features), so the approved material cannot be reviewed on its own.")
+    want_colour = b.colour and f["check_colour"] and not review
     colour_cfg = None
     if want_colour and shade_id:
         sh = tx.one("SELECT id, status, verification, measurement_sha256, source FROM shade_sets WHERE id = %s::uuid"
@@ -174,18 +197,19 @@ def create_comparison(call: Call):
         raise ApiError(422, "invalid", "Some fields need attention.",
                        fields={"test_file_id": "A measurement file can only be checked against an approved shade set "
                                                "measured with a spectrophotometer."})
-    do_text = b.text and test_kind != "spectro"
+    do_text = (b.text and test_kind != "spectro") or review
     k = kind or "leaflet"
     settings = {
         "kind": kind or "leaflet", "languages": b.languages,
-        "strengths": sorted({x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", strengths)}), "step1": b.step1 and f["step1_master_audit"],
-        "step3": b.step3 and f["step3_typography"], "exclude_phrases": eng["exclude_phrases"],
+        "strengths": sorted({x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", strengths)}), "step1": (b.step1 or review) and f["step1_master_audit"],
+        "step3": b.step3 and f["step3_typography"] and not review, "exclude_phrases": eng["exclude_phrases"],
         "rotated_text": b.rotated_text or eng["rotated_text"], "mirror_test": b.mirror_test,
         "ai": {"provider": eng["provider"], "reading_provider": eng["reading_provider"], "review": f["ai_review"],
                "science": f["ai_science"], "read": f["ai_reading"] if b.ai_read is None else (b.ai_read and f["ai_reading"])},
         "text": do_text,
+        "review_only": review,
         "checks": {"colour": colour_cfg, "barcodes": do_text and b.barcodes and f["check_barcodes"],
-                   "graphics": do_text and b.graphics and f["check_graphics"],
+                   "graphics": do_text and b.graphics and f["check_graphics"] and not review,
                    "text_size": do_text and b.text_size and f["check_text_size"],
                    "braille": do_text and b.braille and f["check_braille"],
                    "dieline": do_text and b.dieline and f["check_dieline"]},
@@ -423,32 +447,42 @@ def _meta(call: Call, c: dict, res: dict) -> dict:
     tenant = call.tx.one("SELECT name, timezone FROM tenants WHERE id = %s", c["tenant_id"])
     files = {
         "ref": call.tx.one("SELECT filename, sha256 FROM files WHERE id = %s", c["reference_file_id"]),
-        "test": call.tx.one("SELECT filename, sha256 FROM files WHERE id = %s", c["test_file_id"]),
+        "test": call.tx.one("SELECT filename, sha256 FROM files WHERE id = %s", c["test_file_id"])
+        if c["test_file_id"] else None,
     }
     ai_info = res.get("ai") or {}
+    st = c.get("settings") or {}
+    review = c["purpose"] == "master_review"
     return {
         "Audit ID": c["number"], "Company": tenant["name"], "Product": c["title"],
         "Component": " ".join(x for x in (c.get("product_code"), c.get("component_code")) if x) or "—",
         "Site": c["site_code"], "Reference": c["reference_no"] or "—", "Supplier": c["supplier"] or "—",
-        "Purpose": {"proof": "Artwork proof", "printed_sample": "Printed sample", "supplier_proof": "Print-house proof"}[c["purpose"]],
+        "Purpose": {"proof": "Artwork proof", "printed_sample": "Printed sample", "supplier_proof": "Print-house proof",
+                    "master_review": "Review of the approved material (no test file)"}[c["purpose"]],
         "Started by": c["created_by_name"], "Started": _ts(c["created_at"]), "Completed": _ts(c["finished_at"]),
         "Status": c["status"],
         "Approved file": f"{files['ref']['filename']}  (SHA-256 {files['ref']['sha256'][:16]}…)",
-        "Test file": f"{files['test']['filename']}  (SHA-256 {files['test']['sha256'][:16]}…)",
+        "Test file": f"{files['test']['filename']}  (SHA-256 {files['test']['sha256'][:16]}…)" if files["test"] else
+                     "— (review of the approved material only)",
         "Engine": res.get("engine_version"), "Result SHA-256": c["result_sha256"],
         "AI models": "; ".join(f"{k}: {v}" for k, v in (("reading", ai_info.get("reading_model")),
                                                         ("review", ai_info.get("vision_model")),
                                                         ("science", ai_info.get("science_model"))) if v) or "not used",
-        "Levels run": ", ".join(n for n, on in (("1 approved-text audit", (c.get("settings") or {}).get("step1", True)),
-                                                ("2 content", True),
-                                                ("3 punctuation and typography", (c.get("settings") or {}).get("step3", True)))
+        "Levels run": ", ".join(n for n, on in (("1 approved-text audit", st.get("step1", True)),
+                                                ("2 content", st.get("text", True) and not review),
+                                                ("3 punctuation and typography", st.get("step3", True) and not review),
+                                                ("4 colour", bool((st.get("checks") or {}).get("colour"))),
+                                                ("5 barcodes", bool((st.get("checks") or {}).get("barcodes"))),
+                                                ("6 graphics", bool((st.get("checks") or {}).get("graphics"))),
+                                                ("7 text size, Braille, dieline",
+                                                 any((st.get("checks") or {}).get(k) for k in ("text_size", "braille", "dieline"))))
                                 if on),
         "AI notes": " ".join(ai_info.get("notes") or []) or "—",
         "Reading order": ", ".join(f"{k}: approved {v['approved']}, test {v['design']}, similarity {v['similarity']}"
                                    for k, v in res.get("reading_order", {}).items()),
         "Printed": _ts(call.tx.val("SELECT now()")),
         "approved_name": files["ref"]["filename"], "approved_pages": res["approved"]["pages"],
-        "design_name": files["test"]["filename"],
+        "design_name": files["test"]["filename"] if files["test"] else "—",
     }
 
 

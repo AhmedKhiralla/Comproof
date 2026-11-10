@@ -17,7 +17,7 @@ export interface ComparisonRow {
   component_code: string | null; component_kind: string | null; product_code: string | null; product_name: string | null;
   supplier: string | null; reference_no: string | null; result_summary: { steps: Record<string, Record<string, number>>; total: number } | null;
   created_at: string; finished_at: string | null; closed_at: string | null; created_by_name: string | null;
-  reference_filename: string; test_filename: string;
+  reference_filename: string; test_filename: string | null;
 }
 
 const STATUSES: CompStatus[] = ["queued", "running", "review", "approved", "rejected", "failed", "cancelled"];
@@ -102,12 +102,13 @@ export function NewComparison() {
   const { t } = useI18n();
   const { me, siteId } = useSession();
   const { startAt } = usePerms();
-  const preset = new URLSearchParams(window.location.search).get("component") ?? "";
+  const qp = new URLSearchParams(window.location.search);
+  const preset = qp.get("component") ?? "";
   const comps = useLoad(() => get<{ items: ComponentPick[] }>("/api/components"));
   const sites = (me?.sites ?? []).filter((s) => startAt(s.id));
   const [f, setF] = useState({
     site_id: sites.find((s) => s.id === siteId)?.id ?? sites[0]?.id ?? "", component_id: preset, title: "",
-    purpose: "proof", kind: "leaflet", supplier: "", reference_no: "", eng: true, ara: true, step1: true, step3: true,
+    purpose: qp.get("review") ? "master_review" : "proof", kind: "leaflet", supplier: "", reference_no: "", eng: true, ara: true, step1: true, step3: true,
     mirror: false, rotated: "", aiRead: !!me?.tenant?.ai.read, text: true, sample_source: "scan",
   });
   const feat = me?.tenant?.features ?? {};
@@ -125,14 +126,15 @@ export function NewComparison() {
       title: s.title || `${comp.product_name} · ${comp.name}`, mirror: comp.kind === "blister_foil" ? s.mirror : false }));
   }, [comp]);
   const useMaster = !!comp?.artwork_id && !customRef;
+  const review = f.purpose === "master_review";
   const spectroTest = test?.doc_kind === "spectro";
-  const textOn = f.text && !spectroTest;
+  const textOn = (f.text && !spectroTest) || review;
   const submit = async () => {
     setBusy(true); setErrs({}); setGeneral(null);
     try {
       const r = await post<{ id: string }>("/api/comparisons", {
         site_id: f.site_id, title: f.title, purpose: f.purpose, component_id: f.component_id || null,
-        reference_file_id: useMaster ? null : ref?.id ?? null, test_file_id: test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
+        reference_file_id: useMaster ? null : ref?.id ?? null, test_file_id: review ? null : test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
         kind: f.kind || null, languages: [f.eng && "eng", f.ara && "ara"].filter(Boolean), step1: f.step1, step3: f.step3,
         mirror_test: f.mirror, rotated_text: f.rotated || null, ai_read: f.aiRead, text: textOn,
         ...checks, sample_source: spectroTest ? "spectro" : f.sample_source,
@@ -156,12 +158,12 @@ export function NewComparison() {
             <TextField label={t("new.title")} value={f.title} onChange={(v) => setF({ ...f, title: v })} error={errs.title} required />
             <div className="grid-2">
               <SelectField label={t("new.purpose")} value={f.purpose} onChange={(v) => setF({ ...f, purpose: v })}
-                options={["proof", "supplier_proof", "printed_sample"].map((p) => ({ value: p, label: t(`purpose.${p}` as StringKey) }))} />
+                options={["proof", "supplier_proof", "printed_sample", "master_review"].map((p) => ({ value: p, label: t(`purpose.${p}` as StringKey) }))} />
               <SelectField label={t("new.kind")} value={f.kind} onChange={(v) => setF({ ...f, kind: v })}
                 options={KINDS.map((k) => ({ value: k, label: t(`kind.${k}` as StringKey) }))} />
             </div>
             <div className="grid-2">
-              <TextField label={t("new.supplier")} value={f.supplier} onChange={(v) => setF({ ...f, supplier: v })} />
+              {!review && <TextField label={t("new.supplier")} value={f.supplier} onChange={(v) => setF({ ...f, supplier: v })} />}
               <TextField label={t("new.referenceNo")} value={f.reference_no} dir="ltr" onChange={(v) => setF({ ...f, reference_no: v })} />
             </div>
             {sites.length > 1 && <SelectField label={t("shell.site")} value={f.site_id} onChange={(v) => setF({ ...f, site_id: v })}
@@ -187,7 +189,8 @@ export function NewComparison() {
               {comp?.artwork_id && <button type="button" className="link-btn small" onClick={() => { setCustomRef(!customRef); setRef(null); }}>
                 {customRef ? t("new.useMaster") : t("new.otherReference")}</button>}
             </div>
-            <FileDrop label={t("new.test")} hint={t(f.purpose === "printed_sample" ? "new.testHintSample" : "new.testHint")} value={test} onChange={setTest} error={errs.test_file_id} />
+            {review ? <Notice>{t("review.noTestNeeded")}</Notice>
+              : <FileDrop label={t("new.test")} hint={t(f.purpose === "printed_sample" ? "new.testHintSample" : "new.testHint")} value={test} onChange={setTest} error={errs.test_file_id} />}
           </div>
           {f.purpose === "printed_sample" && <div className="panel-body"><Notice tone="warn">{t("new.sampleNote")}</Notice></div>}
         </section>
@@ -200,19 +203,22 @@ export function NewComparison() {
                 <label className="row small"><input type="checkbox" checked={f.eng} onChange={(e) => setF({ ...f, eng: e.target.checked })} />{t("common.english")}</label>
                 <label className="row small"><input type="checkbox" checked={f.ara} onChange={(e) => setF({ ...f, ara: e.target.checked })} />{t("common.arabic")}</label>
               </div></div>
-            <div className="feature"><div className="text"><strong>{t("new.text")}</strong><span>{t(spectroTest ? "new.textSpectro" : "new.textHint")}</span></div>
-              <Switch label={t("new.text")} checked={textOn} disabled={spectroTest} onChange={(v) => setF({ ...f, text: v })} /></div>
+            {!review && <div className="feature"><div className="text"><strong>{t("new.text")}</strong><span>{t(spectroTest ? "new.textSpectro" : "new.textHint")}</span></div>
+              <Switch label={t("new.text")} checked={textOn} disabled={spectroTest} onChange={(v) => setF({ ...f, text: v })} /></div>}
             {textOn && <>
             <div className="feature"><div className="text"><strong>{t("level.1")}</strong><span>{t("level.1.d")}</span></div>
-              <Switch label={t("level.1")} checked={f.step1} onChange={(v) => setF({ ...f, step1: v })} /></div>
+              {review ? <span className="small muted">{t("new.always")}</span>
+                : <Switch label={t("level.1")} checked={f.step1} onChange={(v) => setF({ ...f, step1: v })} />}</div>
+            {!review && <>
             <div className="feature"><div className="text"><strong>{t("level.2")}</strong><span>{t("level.2.d")}</span></div>
               <span className="small muted">{t("new.always")}</span></div>
             <div className="feature"><div className="text"><strong>{t("level.3")}</strong><span>{t("level.3.d")}</span></div>
               <Switch label={t("level.3")} checked={f.step3} onChange={(v) => setF({ ...f, step3: v })} /></div>
             </>}
+            </>}
             {me?.tenant?.ai.read && <div className="feature"><div className="text"><strong>{t("new.aiRead")}</strong><span>{t("new.aiReadHint")}</span></div>
               <Switch label={t("new.aiRead")} checked={f.aiRead} onChange={(v) => setF({ ...f, aiRead: v })} /></div>}
-            {(f.kind === "blister_foil" || f.kind === "tube") && <div className="feature"><div className="text"><strong>{t("new.mirror")}</strong><span>{t("new.mirrorHint")}</span></div>
+            {!review && (f.kind === "blister_foil" || f.kind === "tube") && <div className="feature"><div className="text"><strong>{t("new.mirror")}</strong><span>{t("new.mirrorHint")}</span></div>
               <Switch label={t("new.mirror")} checked={f.mirror} onChange={(v) => setF({ ...f, mirror: v })} /></div>}
             <div className="feature"><div className="text"><strong>{t("engine.rotated")}</strong><span>{t("engine.rotatedHint")}</span></div>
               <select className="select" style={{ maxWidth: 260 }} value={f.rotated} aria-label={t("engine.rotated")} onChange={(e) => setF({ ...f, rotated: e.target.value })}>
@@ -226,7 +232,7 @@ export function NewComparison() {
         <section className="panel">
           <div className="panel-head"><h2>{t("new.checks")}</h2></div>
           <div className="panel-body">
-            {CHECKS.filter((k) => feat[`check_${k}`] !== false && (k === "colour" || textOn)).map((k) => (
+            {CHECKS.filter((k) => feat[`check_${k}`] !== false && (k === "colour" ? !review : textOn) && !(review && k === "graphics")).map((k) => (
               <div className="feature" key={k}>
                 <div className="text"><strong>{t(`check.${k}` as StringKey)}</strong>
                   <span>{k === "colour"
@@ -247,7 +253,7 @@ export function NewComparison() {
           </div>
         </section>
         <div className="row">
-          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={!test || (!useMaster && !ref) || !f.title || (textOn && !f.eng && !f.ara)}>{t("new.start")}</Button>
+          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={(!review && !test) || (!useMaster && !ref) || !f.title || (textOn && !f.eng && !f.ara)}>{t(review ? "review.start" : "new.start")}</Button>
           <Button variant="ghost" onClick={() => history.back()}>{t("common.cancel")}</Button>
         </div>
       </form>

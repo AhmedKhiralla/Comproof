@@ -154,10 +154,14 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                "vision_model": None, "science_model": None, "reading_model": None, "notes": []}
 
     progress("Loading documents")
-    spectro_test = des_path.lower().endswith((".cgats", ".cxf"))
+    review_only = des_path is None            # review of the approved material on its own
+    spectro_test = bool(des_path) and des_path.lower().endswith((".cgats", ".cxf"))
     do_text = settings.get("text", True) and not spectro_test
     ref = ingest.load(ref_path)
-    des = ingest.Document(name=os.path.basename(des_path), kind="spectro") if spectro_test else ingest.load(des_path)
+    if review_only:
+        des = ingest.Document(name="", kind="none")
+    else:
+        des = ingest.Document(name=os.path.basename(des_path), kind="spectro") if spectro_test else ingest.load(des_path)
     if settings.get("mirror_test"):
         for p in des.pages:
             p.image = ImageOps.mirror(p.image)
@@ -171,7 +175,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         reader = make_reader(read_p, read_stats, threading.Lock())
     if do_text:
         ref_regions, ref_ex = _analyse(ref, phrases, progress, "Approved", rotated, reader, check)
-        des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check)
+        des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check) \
+            if not review_only else ([], [])
     else:
         ref_regions, ref_ex, des_regions, des_ex = [], [], [], []
     if read_p:
@@ -211,7 +216,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     # ---- Levels 2 and 3, per language
     order = {}
-    for lang in [l for l in ("eng", "ara") if l in languages and do_text]:
+    for lang in [l for l in ("eng", "ara") if l in languages and do_text and not review_only]:
         if ref.plain_text is not None:
             a = compare.tokens_from_text("\n".join(l for l in ref.plain_text.splitlines()
                                                    if compare.is_arabic(l) == (lang == "ara")), lang)
@@ -273,7 +278,15 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
     if chk.get("colour") and settings.get("_colour"):
         guarded("colour", lambda: extra.colour_check(chk["colour"], settings["_colour"]["measurement"],
                                                      settings["_colour"]["std_path"], des_path, n, progress))
-    if des.pages:
+    if review_only:
+        # checks that need one file only, run on the approved material
+        if chk.get("barcodes"):
+            guarded("barcodes", lambda: (lambda r: (r[0], {}, r[1], r[2]))(
+                extra.barcode_single(ref, settings.get("product") or {}, n, progress)))
+        if chk.get("text_size") or chk.get("braille") or chk.get("dieline"):
+            guarded("print", lambda: (lambda r: (extra.to_reference(r[0]), {}, r[1], r[2]))(
+                extra.print_check(ref, ref_regions, ref_path, settings, n, progress)))
+    elif des.pages:
         if chk.get("barcodes"):
             guarded("barcodes", lambda: (lambda r: (r[0], {}, r[1], r[2]))(
                 extra.barcode_check(ref, des, settings.get("product") or {}, n, progress)))
@@ -354,8 +367,9 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         "kind": kind,
         "approved": {"name": ref.name, "kind": ref.kind, "pages": len(ref.pages), "sha256": sha256(ref_path),
                      "sizes": [p.image.size for p in ref.pages]},
-        "design": {"name": des.name, "kind": des.kind, "pages": len(des.pages), "sha256": sha256(des_path),
-                   "sizes": [p.image.size for p in des.pages]},
+        "design": {"name": des.name, "kind": des.kind, "pages": len(des.pages),
+                   "sha256": sha256(des_path) if des_path else None, "sizes": [p.image.size for p in des.pages]},
+        "review_only": review_only,
         "settings": {k: v for k, v in settings.items() if k != "ai" and not k.startswith("_")} | {"rotated_text_used": rotated},
         "checks": sections,
         "reading_order": order,
