@@ -85,7 +85,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-        <div className="sidebar-foot">{t("shell.version", { v: "1.2.0" })} · Comp11 Labs</div>
+        <div className="sidebar-foot">{t("shell.version", { v: "1.2.1" })} · Comp11 Labs</div>
       </aside>
       {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 

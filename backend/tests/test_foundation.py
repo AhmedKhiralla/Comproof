@@ -202,3 +202,33 @@ def test_audit_trail_hash_chain(two_companies):
     admin = two_companies["ACME"]["admin"]
     status, body, _ = admin.post("/api/audit/verify")
     assert status == 200 and body["intact"] is True and body["checked"] > 3
+
+
+def test_audit_chain_with_concurrent_writers(db_url, two_companies):
+    """Entries written at the same moment by the engine and by users are chained in id order."""
+    import threading, uuid as _uuid
+    tenant = str(_uuid.uuid4())
+
+    def write(n):
+        conn = psycopg.connect(db_url, autocommit=True)
+        for i in range(n):
+            conn.execute("SELECT cp_audit_event('RUN_STARTED', 'comparisons', %s, 'x', '{}'::jsonb, %s, NULL, 'w')",
+                         (str(i), tenant))
+        conn.close()
+    threads = [threading.Thread(target=write, args=(40,)) for _ in range(4)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    conn = psycopg.connect(db_url, autocommit=True)
+    rows = conn.execute("SELECT prev_hash, row_hash FROM audit_log WHERE tenant_id = %s ORDER BY id", (tenant,)).fetchall()
+    assert len(rows) == 160 and rows[0][0] is None
+    assert all(rows[i][0] == rows[i - 1][1] for i in range(1, len(rows)))
+    conn.execute("SELECT set_config('app.is_system', 'true', false)")
+    assert conn.execute("SELECT checked, first_bad_id FROM cp_audit_verify(%s)", (tenant,)).fetchone() == (160, None)
+    # a superuser who removes an entry in the middle of the chain is found
+    conn.execute("ALTER TABLE audit_log DISABLE TRIGGER audit_log_no_update")
+    victim = conn.execute("SELECT id FROM audit_log WHERE tenant_id = %s ORDER BY id OFFSET 80 LIMIT 1", (tenant,)).fetchone()[0]
+    conn.execute("DELETE FROM audit_log WHERE id = %s", (victim,))
+    conn.execute("ALTER TABLE audit_log ENABLE TRIGGER audit_log_no_update")
+    checked, bad = conn.execute("SELECT checked, first_bad_id FROM cp_audit_verify(%s)", (tenant,)).fetchone()
+    assert checked == 159 and bad is not None and bad > victim
+    conn.close()
