@@ -72,6 +72,8 @@ class Finding:
     des_crop: list = field(default_factory=list)
     read_conf: int = 100          # mean reading confidence of the words involved (OCR 0-100; text layer 100)
     data: dict = field(default_factory=dict)   # structured values for checks beyond the text (colour, barcodes...)
+    key: str = ""                 # message key: the UI renders title/explanation/action in the viewer's language
+    params: dict = field(default_factory=dict)  # values for that message (quotes stay in the document's language)
 
 
 # ---------------------------------------------------------------- normalisation
@@ -401,6 +403,11 @@ def where(tokens: list[Token], doc_label: str) -> str:
     return f"page {t.page + 1}"
 
 
+CATEGORY_KEYS = {"Strength & composition": "strength", "Dose & administration": "dose",
+                 "Safety information": "safety", "Pharmacology": "pharm",
+                 "Storage, pack & manufacturer": "storage", "General text": "general", "Typography": "typo"}
+
+
 ACTIONS = {
     "numeric": "Correct the value on the artwork to match the approved leaflet, or raise a change control "
                "if the approved text itself is wrong. Numbers must never differ.",
@@ -478,6 +485,12 @@ def build_detail(f: "Finding", ref_tokens, des_tokens, i1, i2, j1, j2):
     else:
         f.explanation = f"Approved reads {q(removed or f.ref_text)}; the design reads {q(added or f.des_text)}."
     f.action = ACTIONS.get(f.kind, "Check against the approved leaflet.")
+    if f.kind in ("missing", "added", "numeric", "changed", "ocr"):
+        trim = lambda x: x[:160] + ("…" if len(x) > 160 else "")
+        f.key = f"txt.{f.kind}"
+        f.params = {"ref": trim(removed or f.ref_text), "des": trim(added or f.des_text),
+                    "rn": ", ".join(_numbers(f.ref_text)) or "none", "dn": ", ".join(_numbers(f.des_text)) or "none",
+                    "cat": CATEGORY_KEYS.get(f.category, "")}
     if f.kind != "ocr":
         f.explanation += " " + IMPACT.get(f.category, "")
 
@@ -521,6 +534,7 @@ def diff(ref_tokens: list[Token], des_tokens: list[Token], lang: str, start_id: 
             build_detail(sf, ref_tokens, des_tokens, g["i1"], g["i2"], g["j1"], g["j2"])
             sf.explanation = f"Same letters, different word breaks: approved “{r_txt}”, design “{d_txt}”."
             sf.action = "Fix the spacing on the artwork if the OCR reading is confirmed."
+            sf.key, sf.params = "typo.space1", {"ref": r_txt, "des": d_txt}
             spacing.append(sf)
             n += 1
             continue
@@ -539,6 +553,7 @@ def diff(ref_tokens: list[Token], des_tokens: list[Token], lang: str, start_id: 
                                   f"but the {'word breaks' if kind == 'spacing' else 'punctuation'} differ.")
                 tf.action = "Match the approved spacing and punctuation."
                 tf.category = "Typography"
+                tf.key, tf.params = ("typo.space2" if kind == "spacing" else "typo.punct2"), {"ref": r_txt, "des": d_txt}
                 spacing.append(tf)
             else:
                 of = Finding(f"C{n}", 2, lang, "ocr", "info", "Probable OCR misread (look-alike characters)",
@@ -618,6 +633,7 @@ def typography(ref_tokens: list[Token], des_tokens: list[Token], lang: str, star
             sf.context_after = " ".join(BIDI.sub("", t.raw) for t in ref_tokens[i1 + k + 2:i1 + k + 7])
             sf.explanation = f"Same text, different spacing: approved “{rw}”, design “{dw}”."
             sf.action = "Match the approved spacing (for example between a number and its unit)."
+            sf.key, sf.params = "typo.space3", {"ref": rw, "des": dw}
             out.append(sf)
             n += 1
         for k in range(i2 - i1):
@@ -659,6 +675,7 @@ def typography(ref_tokens: list[Token], des_tokens: list[Token], lang: str, star
                               "case": f"Capitalisation differs: approved “{r.raw}”, design “{d.raw}”."}[kind]
             tf.action = ("Confirm the digit style follows your house style and EDA expectations."
                          if kind == "digits" else "Match the approved punctuation and capitalisation.")
+            tf.key, tf.params = f"typo.{kind}", {"ref": BIDI.sub("", r.raw), "des": BIDI.sub("", d.raw)}
             out.append(tf)
             n += 1
     return out

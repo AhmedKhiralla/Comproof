@@ -92,6 +92,12 @@ def run_one(c: dict) -> None:
         ref = storage.verify(c["ref_key"], c["ref_sha"])
         test = storage.verify(c["test_key"], c["test_sha"]) if c["test_key"] else None
         run_settings = dict(c["settings"])
+        try:
+            with db.transaction(_ctx(tenant)) as tx:
+                t = tx.one("SELECT default_language FROM tenants WHERE id = %s", c["tenant_id"])
+            run_settings.setdefault("reply_lang", (t or {}).get("default_language") or "en")
+        except Exception:
+            run_settings.setdefault("reply_lang", "en")
         colour_cfg = (run_settings.get("checks") or {}).get("colour")
         if colour_cfg:
             run_settings["_colour"] = _load_shades(tenant, colour_cfg)

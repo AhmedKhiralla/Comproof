@@ -198,7 +198,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
             try:
                 texts = {lg: "\n".join(l.text for r in ref_regions if r.lang == lg for l in r.lines)
                          for lg in ("eng", "fra", "ara")}
-                ai_info["science_model"], issues = ai.science(review_p, texts, KIND_LABELS.get(kind, kind))
+                ai_info["science_model"], issues = ai.science(review_p, texts, KIND_LABELS.get(kind, kind),
+                                                              settings.get("reply_lang") or "en")
                 for k, it in enumerate(issues, 1):
                     sev = it.get("severity") if it.get("severity") in ("critical", "major", "minor") else "minor"
                     lang = {"ar": "ara", "fr": "fra"}.get(it.get("language"), "eng")
@@ -337,7 +338,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
             if stopped:
                 return
             try:
-                f.ai = ai.review(review_p, rc, dc, f.ref_text, f.des_text, f.lang)
+                f.ai = ai.review(review_p, rc, dc, f.ref_text, f.des_text, f.lang, settings.get("reply_lang") or "en")
                 apply_review(f)
             except ai.AIConfigError as e:
                 with lock:

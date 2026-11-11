@@ -380,3 +380,6 @@ def test_french_comparison(acme):
     # French section headings are recognised and used as the finding's section
     secs = {x.get("section", "") for x in fra}
     assert any("Posologie" in s_ or "DÉNOMINATION" in s_ or "COMPOSITION" in s_ for s_ in secs), secs
+    # findings carry a message key and parameters, so the UI can say them in the viewer's language
+    assert numeric[0]["key"] == "txt.numeric" and numeric[0]["params"]["ref"], numeric[0]
+    assert all("key" in x and "params" in x for x in res["findings"])

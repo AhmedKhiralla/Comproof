@@ -218,9 +218,10 @@ Return JSON: {{"verdict": "real_difference" | "ocr_noise" | "unclear",
 "explanation": "one sentence in plain English describing what is printed differently"}}"""
 
 
-def review(provider: Provider, ref_img, des_img, ref_txt: str, des_txt: str, lang: str) -> dict:
+def review(provider: Provider, ref_img, des_img, ref_txt: str, des_txt: str, lang: str, reply_lang: str = "en") -> dict:
     content = [{"type": "text", "text": REVIEW_PROMPT.format(
-        ref=ref_txt[:600], des=des_txt[:600], lang="Arabic" if lang == "ara" else "English")}]
+        ref=ref_txt[:600], des=des_txt[:600], lang={"ara": "Arabic", "fra": "French"}.get(lang, "English"))
+        + f" Write the \"explanation\" value in {REPLY_LANGS.get(reply_lang, 'English')}; quote document text in its original language."}]
     for im in (ref_img, des_img):
         if im is not None:
             content.append({"type": "image_url", "image_url": {"url": img_data_url(im)}})
@@ -253,10 +254,14 @@ Return JSON: {{"issues": [{{"severity": "critical|major|minor", "language": "en|
 SCIENCE_HEADERS = {"eng": ("ENGLISH TEXT", 60000), "fra": ("FRENCH TEXT", 60000), "ara": ("ARABIC TEXT", 30000)}
 
 
-def science(provider: Provider, texts: dict[str, str], kind: str) -> tuple[str, list]:
+REPLY_LANGS = {"en": "English", "fr": "French", "ar": "Arabic"}
+
+
+def science(provider: Provider, texts: dict[str, str], kind: str, reply_lang: str = "en") -> tuple[str, list]:
     parts = [f"{SCIENCE_HEADERS[lg][0]}:\n{(texts.get(lg) or '').strip()[:SCIENCE_HEADERS[lg][1]]}"
              for lg in ("eng", "fra", "ara") if (texts.get(lg) or "").strip()]
     msg = SCIENCE_PROMPT.format(kind=kind, texts="\n\n".join(parts) or "TEXT:\n(empty)")
+    msg += f"\nWrite the \"problem\" and \"suggestion\" values in {REPLY_LANGS.get(reply_lang, 'English')}; keep every quote in its original language."
     out = chat(provider, provider.text_model, [{"role": "user", "content": msg}], max_tokens=4000, timeout=240)
     return out["model"], out["data"].get("issues") or []
 

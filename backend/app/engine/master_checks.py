@@ -37,9 +37,11 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
     out: list[Finding] = []
     n = start_id
 
-    def add(kind, sev, title, text, loc, note=""):
+    def add(kind, sev, title, text, loc, note="", key="", params=None):
         nonlocal n
-        out.append(Finding(f"M{n}", 1, "eng", kind, sev, title, text, "", loc, [], 1.0, True, None, note))
+        f = Finding(f"M{n}", 1, "eng", kind, sev, title, text, "", loc, [], 1.0, True, None, note)
+        f.key, f.params = key, params or {}
+        out.append(f)
         n += 1
 
     text_all = "\n".join(ln.text for _, ln in lines)
@@ -69,7 +71,8 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
             try:
                 if float(a) != float(b):
                     add("consistency", "critical", "Strength in name does not match quantity in composition",
-                        ln.text, [(p, ln.box)], f"Name says {a} mg, composition says {b} mg.")
+                        ln.text, [(p, ln.box)], f"Name says {a} mg, composition says {b} mg.",
+                        key="mc.strength", params={"a": a, "b": b})
             except ValueError:
                 pass
 
@@ -84,7 +87,7 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
                 for w in words:
                     if re.search(rf"\b{w}\b", low):
                         add("consistency", "major", f"Dosage form wording: '{w}' used for a {form} product",
-                            ln.text, [(p, ln.box)])
+                            ln.text, [(p, ln.box)], key="mc.form", params={"w": w, "form": form})
                         break
 
     # 3. Same heading repeated
@@ -96,7 +99,7 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
         if len(key) < 8:
             continue
         if key in seen:
-            add("structure", "minor", "Heading appears twice", ln.text, [seen[key], (p, ln.box)])
+            add("structure", "minor", "Heading appears twice", ln.text, [seen[key], (p, ln.box)], key="mc.heading")
         else:
             seen[key] = (p, ln.box)
 
@@ -105,7 +108,7 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
         m = re.search(r"(?:ATC\s*code|code\s*ATC)\s*[:\-]?\s*([A-Z0-9]{3,9})", ln.text, re.I)
         if m and not re.fullmatch(r"[A-Z]\d{2}[A-Z]{2}\d{2}", m.group(1).upper()):
             add("data", "major", f"ATC code '{m.group(1)}' is not a complete 7-character code",
-                ln.text, [(p, ln.box)])
+                ln.text, [(p, ln.box)], key="mc.atc", params={"code": m.group(1)})
 
     # 5. SmPC section numbering present and in order
     found = []
@@ -116,7 +119,8 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
     missing = [s for s in SMPC_SECTIONS if s not in found]
     if found and missing:
         add("structure", "minor", "SmPC section headings not found (check numbering)",
-            ", ".join(missing), [], "May also be an OCR miss — confirm on the scan.")
+            ", ".join(missing), [], "May also be an OCR miss — confirm on the scan.",
+            key="mc.smpc", params={"missing": ", ".join(missing)})
 
     # 6. Maximum dose stated consistently
     maxes = re.findall(r"maximum (?:recommended )?(?:daily )?dose is\s*([\d.]+)\s*mg", text_all, re.I)
@@ -124,7 +128,8 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
               re.findall(r"dose (?:quotidienne )?maximale(?: recommandée)? est de\s*([\d.,]+)\s*mg", text_all, re.I)]
     if len(set(maxes)) > 1:
         add("consistency", "critical", "Maximum dose stated with different values",
-            ", ".join(sorted(set(maxes))) + " mg", [])
+            ", ".join(sorted(set(maxes))) + " mg", [],
+            key="mc.maxdose", params={"vals": ", ".join(sorted(set(maxes)))})
 
     # 7. Words glued together (missing space) — e.g. "isoprenalineor"
     glue = re.compile(r"\b([a-z]{5,})(or|and|of|the|with|to|in)\b")
@@ -133,5 +138,6 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
         for w in ln.words:
             m = glue.fullmatch(w.text.lower().strip(".,;:()"))
             if m and vocab[m.group(1)] >= 1 and vocab[w.text.lower().strip(".,;:()")] == 1 and w.conf > 80:
-                add("typography", "minor", f"Missing space: '{w.text}'", ln.text, [(p, w.box)])
+                add("typography", "minor", f"Missing space: '{w.text}'", ln.text, [(p, w.box)],
+                    key="mc.glue", params={"w": w.text})
     return out

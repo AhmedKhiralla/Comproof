@@ -68,6 +68,8 @@ def colour_check(cfg: dict, measurement: dict, std_path: str | None, des_path: s
             x0, y0, x1, y1 = max(0, box[0] - m), max(0, box[1] - m), box[2] + m, box[3] + m
             a_img = _stack(strip, Image.fromarray(std_img[y0:y1, x0:x1]))
             b_img = _stack(sample_strip, Image.fromarray(images["sample"][y0:y1, x0:x1]))
+        f.key = f"col.{v}"
+        f.params = {"name": row["name"], "std_action": not (row.get("advice") or [])}
         shots[fid] = (a_img, b_img)
         findings.append(f)
     return findings, shots, res, n
@@ -105,6 +107,7 @@ def barcode_check(ref, des, product: dict, n: int, progress):
                      section=row["symbology"], category="Barcodes", explanation=p["detail"],
                      action="Correct the barcode on the artwork, or confirm the change through change control.",
                      data={"symbology": row["symbology"], "status": row["status"]})
+        f.key, f.params = p.get("key") or "", p.get("params") or {}
         n += 1
         findings.append(f)
     section = {"decoders": barcodes.decoders(), "approved": len(r_codes), "test": len(d_codes),
@@ -125,6 +128,7 @@ def graphics_check(ref, des, ref_regions, des_regions, n: int, progress):
                      explanation=f"{d['title']} ({d['area_mm2']} mm²) at the marked position.",
                      action="Restore the approved graphic, or confirm the change through change control.",
                      data={"area_mm2": d["area_mm2"], "kind": d["kind"]})
+        f.key, f.params = f"gfx.{d['kind']}", {"area": d["area_mm2"]}
         shots[fid] = (d["crop_ref"], d["crop_des"])
         findings.append(f)
     return findings, shots, {"differences": len(diffs), "notes": notes}, n
@@ -148,6 +152,8 @@ def print_check(des, des_regions, des_path: str, settings: dict, n: int, progres
                                      f"the minimum for this packaging type is {stats['limit_pt']:g} pt.",
                          action="Enlarge the text or confirm the size is acceptable for this market.",
                          data={"pt": s["pt"], "lines": s["lines"]})
+            f.key = "pr.size"
+            f.params = {"pt": s["pt"], "lines": s["lines"], "limit": f"{stats['limit_pt']:g}", "how": stats["measured"]}
             f.lang = s.get("lang", "eng")
             n += 1
             findings.append(f)
@@ -163,6 +169,7 @@ def print_check(des, des_regions, des_path: str, settings: dict, n: int, progres
                          des_text=" / ".join(b["text"] for b in info["found"]),
                          des_loc=[(p["page"], p["box"])] if p.get("box") else [], section="Braille", category="Print",
                          explanation=p["detail"], action="Correct the Braille, or confirm it by touch on the printed item.")
+            f.key, f.params = p.get("key") or "", p.get("params") or {}
             n += 1
             findings.append(f)
     if checks.get("dieline") and des.kind == "pdf-vector" and des_path.lower().endswith(".pdf"):
@@ -174,6 +181,7 @@ def print_check(des, des_regions, des_path: str, settings: dict, n: int, progres
             f = _finding(f"P{n}", STEP_PRINT, "dieline", p["severity"], p["title"],
                          des_loc=[(p["page"], [int(v) for v in p["box"]])], section="Dieline", category="Print",
                          explanation=p["detail"], action="Move the text away from the fold or cut edge.")
+            f.key, f.params = p.get("key") or "", p.get("params") or {}
             n += 1
             findings.append(f)
     return findings, section, n
@@ -204,16 +212,20 @@ def barcode_single(ref, product: dict, n: int, progress):
         rows.append({"symbology": c["symbology"], "approved": c["text"], "test": None, "gtin": c.get("gtin"),
                      "fields_approved": c.get("fields"), "status": "invalid" if problems else "valid"})
         if problems:
-            findings.append(_finding(f"B{n}", STEP_BARCODE, "barcode", sev, f"{c['symbology']} barcode data is not valid",
-                                     ref_text=c["text"], ref_loc=[(c["page"], [int(v) for v in c["box"]])],
-                                     section=c["symbology"], category="Barcodes", explanation=" ".join(problems),
-                                     action="Correct the barcode before the artwork is approved."))
+            f = _finding(f"B{n}", STEP_BARCODE, "barcode", sev, f"{c['symbology']} barcode data is not valid",
+                         ref_text=c["text"], ref_loc=[(c["page"], [int(v) for v in c["box"]])],
+                         section=c["symbology"], category="Barcodes", explanation=" ".join(problems),
+                         action="Correct the barcode before the artwork is approved.")
+            f.key, f.params = "bs.invalid", {"sym": c["symbology"]}
+            findings.append(f)
             n += 1
     if gtin and not codes:
-        findings.append(_finding(f"B{n}", STEP_BARCODE, "barcode", "minor", "No barcode found on the approved material",
-                                 section="Barcodes", category="Barcodes",
-                                 explanation=f"The product has GTIN {gtin} but no barcode was read on this file.",
-                                 action="Check whether this packaging type should carry a barcode."))
+        f = _finding(f"B{n}", STEP_BARCODE, "barcode", "minor", "No barcode found on the approved material",
+                     section="Barcodes", category="Barcodes",
+                     explanation=f"The product has GTIN {gtin} but no barcode was read on this file.",
+                     action="Check whether this packaging type should carry a barcode.")
+        f.key, f.params = "bs.none", {"gtin": gtin}
+        findings.append(f)
         n += 1
     return findings, {"decoders": barcodes.decoders(), "approved": len(codes), "test": 0, "rows": rows,
                       "single": True}, n

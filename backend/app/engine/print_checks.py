@@ -214,22 +214,25 @@ def braille_check(doc, expected_name: str, strengths: list[str], required: bool)
             if doc.kind == "pdf-vector":
                 problems.append({"severity": "major", "title": "No Braille found",
                                  "detail": "Braille is required for this packaging, but no Braille dots were found on "
-                                           "the artwork."})
+                                           "the artwork.", "key": "pr.br_req", "params": {}})
             else:
                 problems.append({"severity": "minor", "title": "Braille not visible on the scan",
                                  "detail": "No Braille was detected. Embossing often does not show on a flat scan: "
-                                           "check the printed item by touch."})
+                                           "check the printed item by touch.", "key": "pr.br_scan", "params": {}})
         return problems, info
     name = norm(expected_name.split()[0]) if expected_name else ""
     if name and name not in joined:
         problems.append({"severity": "critical", "title": "Braille does not show the product name",
                          "detail": f"Braille reads “{' / '.join(b['text'] for b in found)}”; expected the name "
-                                   f"“{expected_name}”.", "page": found[0]["page"], "box": found[0]["box"]})
+                                   f"“{expected_name}”.", "page": found[0]["page"], "box": found[0]["box"],
+                         "key": "pr.br_name",
+                         "params": {"read": " / ".join(b["text"] for b in found), "name": expected_name}})
     if strengths and not any(norm(s) in joined for s in strengths):
         problems.append({"severity": "major", "title": "Braille strength not found",
                          "detail": f"Braille reads “{' / '.join(b['text'] for b in found)}”; none of the registered "
                                    f"strengths ({', '.join(strengths)}) was read.",
-                         "page": found[0]["page"], "box": found[0]["box"]})
+                         "page": found[0]["page"], "box": found[0]["box"], "key": "pr.br_strength",
+                         "params": {"read": " / ".join(b["text"] for b in found), "s": ", ".join(strengths)}})
     return problems, info
 
 
@@ -311,9 +314,10 @@ def dieline_check(pdf_path: str, render_scale: float, margin_mm: float = 1.5) ->
                                 min(abs(bx[1] - s["y0"]), abs(bx[3] - s["y0"])) < m:
                             near.append(w)
                             break
-            for ws, title, sev, what in ((crossing, "Text crosses a fold line", "major", "crosses a fold"),
-                                         (near, "Text too close to a cut edge", "major",
-                                          f"is within {margin_mm} mm of a cut edge")):
+            for ws, title, sev, what, key in ((crossing, "Text crosses a fold line", "major", "crosses a fold",
+                                              "pr.die_fold"),
+                                             (near, "Text too close to a cut edge", "major",
+                                              f"is within {margin_mm} mm of a cut edge", "pr.die_cut")):
                 if not ws:
                     continue
                 x0 = min(w["x0"] for w in ws)
@@ -322,5 +326,7 @@ def dieline_check(pdf_path: str, render_scale: float, margin_mm: float = 1.5) ->
                 y1 = max(w["bottom"] for w in ws)
                 problems.append({"severity": sev, "title": title, "page": pi,
                                  "detail": f"{len(ws)} word(s) {what}: " + " ".join(w["text"] for w in ws[:12]),
-                                 "box": [x0 * render_scale, y0 * render_scale, x1 * render_scale, y1 * render_scale]})
+                                 "box": [x0 * render_scale, y0 * render_scale, x1 * render_scale, y1 * render_scale],
+                                 "key": key,
+                                 "params": {"n": len(ws), "m": margin_mm, "words": " ".join(w["text"] for w in ws[:12])}})
     return problems, info

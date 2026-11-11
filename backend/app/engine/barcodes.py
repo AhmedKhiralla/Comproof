@@ -299,7 +299,8 @@ def compare_sets(ref: list[dict], test: list[dict], purpose: str, product_gtin: 
             row["status"] = "missing"
             problems.append({"severity": "critical", "title": f"{r['symbology']} barcode missing or unreadable",
                              "detail": f"The approved artwork has a {r['symbology']} code ({r['text']}); none was "
-                                       "read on the test file.", "row": row})
+                                       "read on the test file.", "row": row,
+                             "key": "bc.missing", "params": {"sym": r["symbology"], "text": r["text"]}})
         elif r.get("gs1") and t.get("gs1"):
             fa, ft = r.get("fields", {}), t.get("fields", {})
             fixed_diff = [ai for ai in set(fa) | set(ft) if ai not in VARIABLE_AIS and fa.get(ai) != ft.get(ai)]
@@ -309,7 +310,8 @@ def compare_sets(ref: list[dict], test: list[dict], purpose: str, product_gtin: 
                 problems.append({"severity": "critical", "title": f"{r['symbology']} data changed",
                                  "detail": "; ".join(f"({ai}) {GS1_AI.get(ai, ('AI',))[0]}: approved "
                                                      f"“{fa.get(ai, '—')}”, test “{ft.get(ai, '—')}”" for ai in
-                                                     sorted(fixed_diff)), "row": row})
+                                                     sorted(fixed_diff)), "row": row,
+                                 "key": "bc.gs1", "params": {"sym": r["symbology"]}})
             elif var_diff:
                 row["status"] = "variable_data"
                 if purpose == "proof":
@@ -318,18 +320,22 @@ def compare_sets(ref: list[dict], test: list[dict], purpose: str, product_gtin: 
                                                          f"“{fa.get(ai, '—')}”, test “{ft.get(ai, '—')}”"
                                                          for ai in sorted(var_diff))
                                                + ". Batch, expiry and serial normally change per print run.",
-                                     "row": row})
+                                     "row": row, "key": "bc.vdata", "params": {"sym": r["symbology"]}})
         elif r["text"] != t["text"]:
             row["status"] = "changed"
             problems.append({"severity": "critical", "title": f"{r['symbology']} content changed",
-                             "detail": f"Approved “{r['text']}”, test “{t['text']}”.", "row": row})
+                             "detail": f"Approved “{r['text']}”, test “{t['text']}”.", "row": row,
+                             "key": "bc.content", "params": {"sym": r["symbology"], "ref": r["text"], "des": t["text"]}})
         for c, who in ((r, "approved artwork"), (t, "test file")):
             for p in (c or {}).get("problems", []):
                 problems.append({"severity": "critical" if "check digit" in p else "major",
-                                 "title": f"Invalid barcode data on the {who}", "detail": p, "row": row})
+                                 "title": f"Invalid barcode data on the {who}", "detail": p, "row": row,
+                                 "key": "bc.invalid_ref" if who == "approved artwork" else "bc.invalid_test",
+                                 "params": {}})
         if product_gtin and t and t.get("gtin") and gtin14(t["gtin"]) != gtin14(product_gtin):
             problems.append({"severity": "critical", "title": "GTIN does not match the product record",
-                             "detail": f"Test code GTIN {t['gtin']}, product record GTIN {product_gtin}.", "row": row})
+                             "detail": f"Test code GTIN {t['gtin']}, product record GTIN {product_gtin}.", "row": row,
+                             "key": "bc.gtin", "params": {"t": t["gtin"], "p": product_gtin}})
         rows.append(row)
     for j, t in enumerate(test):
         if j in used:
@@ -338,10 +344,12 @@ def compare_sets(ref: list[dict], test: list[dict], purpose: str, product_gtin: 
                "fields_approved": None, "fields_test": t.get("fields"), "ref_box": None, "ref_page": None,
                "test_box": t["box"], "test_page": t.get("page"), "status": "added"}
         problems.append({"severity": "major", "title": f"Extra {t['symbology']} barcode on the test file",
-                         "detail": f"“{t['text']}” is not on the approved artwork.", "row": row})
+                         "detail": f"“{t['text']}” is not on the approved artwork.", "row": row,
+                         "key": "bc.extra", "params": {"sym": t["symbology"], "text": t["text"]}})
         for p in t.get("problems", []):
             problems.append({"severity": "critical" if "check digit" in p else "major",
-                             "title": "Invalid barcode data on the test file", "detail": p, "row": row})
+                             "title": "Invalid barcode data on the test file", "detail": p, "row": row,
+                             "key": "bc.invalid_test", "params": {}})
         rows.append(row)
     return rows, problems
 

@@ -20,6 +20,45 @@ interface Finding {
   ai: { verdict?: string; approved_reads?: string; design_reads?: string; explanation?: string; model?: string } | null;
   note: string; section: string; category: string; segments: [string, string][]; context_before: string; context_after: string;
   where_ref: string; where_des: string; explanation: string; action: string; ref_crop: number[]; des_crop: number[]; read_conf?: number;
+  key?: string; params?: Record<string, string | number | boolean>;
+}
+
+/** Finding texts in the viewer's language. Quoted document text stays in the document's own language. */
+const CAT_KEYS: Record<string, string> = {
+  "Master leaflet": "master", "AI scientific review": "aiscience", "Strength & composition": "strength",
+  "Dose & administration": "dose", "Safety information": "safety", "Pharmacology": "pharm",
+  "Storage, pack & manufacturer": "storage", "General text": "general", "Typography": "typo",
+  "Colour": "colour", "Barcodes": "barcodes", "Graphics & layout": "graphics", "Print": "print",
+};
+type Tr = (key: StringKey, vars?: Record<string, string | number>) => string;
+type Txr = (key: string, fallback: string, vars?: Record<string, string | number>) => string;
+function fndWhere(w: string, tx: Txr): string {
+  if (!w) return w;
+  if (w === "approved text") return tx("fnd.where.approved", w);
+  let m = w.match(/^page (\d+), column (\d+) of (\d+)$/);
+  if (m) return tx("fnd.where.col", w, { n: m[1], c: m[2], k: m[3] });
+  m = w.match(/^scan page (\d+), (left|right) half$/);
+  if (m) return tx(m[2] === "left" ? "fnd.where.left" : "fnd.where.right", w, { n: m[1] });
+  m = w.match(/^page (\d+)$/);
+  if (m) return tx("fnd.where.page", w, { n: m[1] });
+  return w;
+}
+function fndText(f: Finding, t: Tr, tx: Txr): { title: string; expl: string; action: string; cat: string } {
+  const P: Record<string, string | number> = { ...(f.params ?? {}) } as Record<string, string | number>;
+  if (P.how) P.how = t((P.how === "exact" ? "print.exact" : "print.estimated") as StringKey);
+  const cat = tx(`fnd.cat.${CAT_KEYS[f.category] ?? ""}`, f.category);
+  if (!f.key) return { title: f.title, expl: f.explanation || f.title, action: f.action, cat };
+  const where = (f.section || "").replace(/^(PIL \d+ · |\d+(\.\d+)?\.?\s+)/, "");
+  let title = tx(`fnd.${f.key}.t`, "", P);
+  if (title && f.key.startsWith("txt.") && f.kind !== "ocr" && where) title = `${title} — ${where}`;
+  let expl = tx(`fnd.${f.key}.e`, "", P);
+  if (expl && f.key.startsWith("txt.") && f.kind !== "ocr" && P.cat) {
+    const imp = tx(`fnd.impact.${P.cat}`, "");
+    if (imp) expl = `${expl} ${imp}`;
+  }
+  let action = tx(`fnd.${f.key}.a`, "", P);
+  if (f.key.startsWith("col.") && !(f.params ?? {}).std_action) action = "";
+  return { title: title || f.title, expl: expl || f.explanation || f.title, action: action || f.action, cat };
 }
 interface Result {
   engine_version: string; kind: string; findings: Finding[];
@@ -95,9 +134,9 @@ function DiffText({ f }: { f: Finding }) {
 }
 
 function Shot({ cid, f, side, onOpen }: { cid: string; f: Finding; side: "approved" | "design"; onOpen: () => void }) {
-  const { t } = useI18n();
+  const { t, tx } = useI18n();
   const name = `${f.id}_${side}.jpg`;
-  const where = side === "approved" ? f.where_ref : f.where_des;
+  const where = fndWhere(side === "approved" ? f.where_ref : f.where_des, tx);
   const ocr = side === "approved" ? f.ref_text : f.des_text;
   const crop = side === "approved" ? f.ref_crop : f.des_crop;
   return (
@@ -146,7 +185,8 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
   cid: string; f: Finding; open: boolean; active: boolean; d?: Decision; canDecide: boolean;
   onToggle: () => void; onView: () => void; onDecided: (fid: string, x: Decision) => void;
 }) {
-  const { t } = useI18n();
+  const { t, tx } = useI18n();
+  const L = fndText(f, t, tx);
   const state = d?.decision ?? "pending";
   const peek = (f.segments || []).filter((s) => s[0] !== "eq").map((s) => (s[0] === "del" ? "− " : "+ ") + s[1]).join("   ") || f.ref_text || f.des_text;
   const two = f.step !== 1 && !useContext(ReviewOnly);
@@ -154,9 +194,9 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
     <article className={`rep-card sev-${f.severity} ${open ? "open" : ""} ${active ? "active" : ""}`} id={`f-${f.id}`}>
       <button type="button" className="rep-row" aria-expanded={open} onClick={onToggle}>
         <span className="sevtag">{t(`sev.${f.severity}` as StringKey)}</span>
-        <span className="ttl" dir="auto">{f.title}</span>
+        <span className="ttl" dir="auto">{L.title}</span>
         <span className={`state ${state}`}>{t(`dec.${state}` as StringKey)}</span>
-        <span className="meta"><span className="mono-id">{f.id}</span><span dir="auto">{f.section || "—"}</span><span>{f.category}</span>
+        <span className="meta"><span className="mono-id">{f.id}</span><span dir="auto">{f.section || "—"}</span><span>{L.cat}</span>
           <span>{f.lang === "ara" ? "العربية" : f.lang === "fra" ? "Français" : "English"}</span>
           {f.read_conf !== undefined && f.read_conf < 75 && <span className="lowconf">{t("rep.lowConf", { n: f.read_conf })}</span>}</span>
         {!open && <span className={`peek ${isAr(peek) ? "ar" : ""}`} dir="auto">{peek}</span>}
@@ -173,8 +213,8 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
             {two && <Shot cid={cid} f={f} side="design" onOpen={onView} />}
           </div>
           <div className="rep-explain">
-            <div><h4>{t("rep.what")}</h4><p dir="auto">{f.explanation || f.title}</p></div>
-            <div><h4>{t("rep.action")}</h4><p>{f.action}</p></div>
+            <div><h4>{t("rep.what")}</h4><p dir="auto">{L.expl}</p></div>
+            <div><h4>{t("rep.action")}</h4><p>{L.action}</p></div>
           </div>
           {f.note && f.step === 2 && <div className="rep-ai">{f.note}</div>}
           {f.ai?.verdict && <div className="rep-ai"><b>{t("rep.ai")} · {t(`ai.${f.ai.verdict}` as StringKey)}</b>
@@ -187,7 +227,7 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
 }
 
 function Viewer({ cid, res, f, onClose, onStep }: { cid: string; res: Result; f: Finding; onClose: () => void; onStep: (dir: number) => void }) {
-  const { t } = useI18n();
+  const { t, tx } = useI18n();
   const [zoom, setZoom] = useState(1);
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -209,12 +249,12 @@ function Viewer({ cid, res, f, onClose, onStep }: { cid: string; res: Result; f:
     const z = Math.min(8, Math.max(1, (0.8 * W) / lineW)) * zoom;
     const boxes = [...loc.filter((x) => x[0] === p).map((x) => ({ b: x[1], w: false })), ...hl.filter((x) => x[0] === p).map((x) => ({ b: x[1], w: true }))];
     return <ViewerPane key={`${f.id}-${doc}-${zoom}`} doc={doc} cid={cid} page={p} W={W} H={H} z={z} boxes={boxes}
-      where={doc === "approved" ? f.where_ref : f.where_des} />;
+      where={fndWhere(doc === "approved" ? f.where_ref : f.where_des, tx)} />;
   };
   return (
     <div className="viewer" role="dialog" aria-modal="true" aria-label={t("rep.viewer")}>
       <div className="vbar">
-        <strong className="grow" dir="auto">{f.id} · {f.title}</strong>
+        <strong className="grow" dir="auto">{f.id} · {fndText(f, t, tx).title}</strong>
         <Button size="sm" iconOnly icon={<LuChevronLeft />} aria-label={t("common.previous")} onClick={() => onStep(-1)} />
         <Button size="sm" iconOnly icon={<LuChevronRight />} aria-label={t("common.next")} onClick={() => onStep(1)} />
         <Button size="sm" iconOnly icon={<LuMinus />} aria-label={t("rep.zoomOut")} onClick={() => setZoom((v) => Math.max(0.6, v / 1.35))} />
@@ -253,7 +293,7 @@ function ViewerPane({ doc, cid, page, W, H, z, boxes, where }: {
 }
 
 function LeafletMap({ cid, res, items, active, onPick }: { cid: string; res: Result; items: Finding[]; active: string | null; onPick: (id: string) => void }) {
-  const { t } = useI18n();
+  const { t, tx } = useI18n();
   const [doc, setDoc] = useState<"design" | "approved">(res.review_only ? "approved" : "design");
   const sizes = res[doc].sizes;
   return (
@@ -274,7 +314,7 @@ function LeafletMap({ cid, res, items, active, onPick }: { cid: string; res: Res
               if (!loc?.length || loc[0][0] !== p) return null;
               const b = loc[0][1];
               return <button key={f.id} type="button" className={`pin sev-${f.severity} ${active === f.id ? "active" : ""}`}
-                title={`${f.id} · ${f.title}`} aria-label={`${f.id} · ${f.title}`} onClick={() => onPick(f.id)}
+                title={`${f.id} · ${fndText(f, t, tx).title}`} aria-label={`${f.id} · ${fndText(f, t, tx).title}`} onClick={() => onPick(f.id)}
                 style={{ left: `${((b[0] + b[2]) / 2 / W) * 100}%`, top: `${((b[1] + b[3]) / 2 / H) * 100}%` }} />;
             })}
           </div>
