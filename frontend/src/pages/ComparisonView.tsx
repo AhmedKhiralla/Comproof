@@ -326,7 +326,7 @@ function LeafletMap({ cid, res, items, active, onPick }: { cid: string; res: Res
 }
 
 function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
-  const { t, dateTime } = useI18n();
+  const { t, dateTime, lang: uiLang } = useI18n();
   const toast = useToast();
   const res = d.result!;
   const F = res.findings;
@@ -444,9 +444,9 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
         <span className="spacer" />
         <Menu trigger={(p) => <Button icon={<LuDownload />} {...p}>{t("rep.export")}</Button>}>
           {(close) => <>
-            <MenuItem icon={<LuFileText />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.pdf`; }}>{t("rep.exportPdf")}</MenuItem>
-            <MenuItem icon={<LuFileSpreadsheet />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.xlsx`; }}>{t("rep.exportXlsx")}</MenuItem>
-            <MenuItem icon={<LuGlobe />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.html`; }}>{t("rep.exportHtml")}</MenuItem>
+            <MenuItem icon={<LuFileText />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.pdf?lang=${uiLang}`; }}>{t("rep.exportPdf")}</MenuItem>
+            <MenuItem icon={<LuFileSpreadsheet />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.xlsx?lang=${uiLang}`; }}>{t("rep.exportXlsx")}</MenuItem>
+            <MenuItem icon={<LuGlobe />} onClick={() => { close(); window.location.href = `/api/comparisons/${d.id}/export.html?lang=${uiLang}`; }}>{t("rep.exportHtml")}</MenuItem>
           </>}
         </Menu>
         {d.permissions.sign_reviewed && <Button icon={<LuLockKeyhole />} onClick={() => setSigning("reviewed")}>{t("sign.do.reviewed")}</Button>}

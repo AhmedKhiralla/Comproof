@@ -443,7 +443,8 @@ def retry_comparison(call: Call):
 
 
 # ------------------------------------------------------------------ exports
-def _meta(call: Call, c: dict, res: dict) -> dict:
+def _meta(call: Call, c: dict, res: dict, lang: str = "en") -> dict:
+    from ..engine import messages
     tenant = call.tx.one("SELECT name, timezone FROM tenants WHERE id = %s", c["tenant_id"])
     files = {
         "ref": call.tx.one("SELECT filename, sha256 FROM files WHERE id = %s", c["reference_file_id"]),
@@ -457,28 +458,25 @@ def _meta(call: Call, c: dict, res: dict) -> dict:
         "Audit ID": c["number"], "Company": tenant["name"], "Product": c["title"],
         "Component": " ".join(x for x in (c.get("product_code"), c.get("component_code")) if x) or "—",
         "Site": c["site_code"], "Reference": c["reference_no"] or "—", "Supplier": c["supplier"] or "—",
-        "Purpose": {"proof": "Artwork proof", "printed_sample": "Printed sample", "supplier_proof": "Print-house proof",
-                    "master_review": "Review of the approved material (no test file)"}[c["purpose"]],
+        "Purpose": messages.PURPOSE_L.get(lang, messages.PURPOSE_L["en"])[c["purpose"]],
         "Started by": c["created_by_name"], "Started": _ts(c["created_at"]), "Completed": _ts(c["finished_at"]),
-        "Status": c["status"],
+        "Status": messages.STATUS_L.get(lang, messages.STATUS_L["en"]).get(c["status"], c["status"]),
         "Approved file": f"{files['ref']['filename']}  (SHA-256 {files['ref']['sha256'][:16]}…)",
         "Test file": f"{files['test']['filename']}  (SHA-256 {files['test']['sha256'][:16]}…)" if files["test"] else
-                     "— (review of the approved material only)",
+                     messages.MISC_L.get(lang, messages.MISC_L["en"])["review_only"],
         "Engine": res.get("engine_version"), "Result SHA-256": c["result_sha256"],
         "AI models": "; ".join(f"{k}: {v}" for k, v in (("reading", ai_info.get("reading_model")),
                                                         ("review", ai_info.get("vision_model")),
-                                                        ("science", ai_info.get("science_model"))) if v) or "not used",
-        "Levels run": ", ".join(n for n, on in (("1 approved-text audit", st.get("step1", True)),
-                                                ("2 content", st.get("text", True) and not review),
-                                                ("3 punctuation and typography", st.get("step3", True) and not review),
-                                                ("4 colour", bool((st.get("checks") or {}).get("colour"))),
-                                                ("5 barcodes", bool((st.get("checks") or {}).get("barcodes"))),
-                                                ("6 graphics", bool((st.get("checks") or {}).get("graphics"))),
-                                                ("7 text size, Braille, dieline",
-                                                 any((st.get("checks") or {}).get(k) for k in ("text_size", "braille", "dieline"))))
-                                if on),
+                                                        ("science", ai_info.get("science_model"))) if v)
+                     or messages.MISC_L.get(lang, messages.MISC_L["en"])["not_used"],
+        "Levels run": ", ".join(messages.LEVEL_SHORT_L.get(lang, messages.LEVEL_SHORT_L["en"])[n] for n, on in (
+            (1, st.get("step1", True)), (2, st.get("text", True) and not review),
+            (3, st.get("step3", True) and not review), (4, bool((st.get("checks") or {}).get("colour"))),
+            (5, bool((st.get("checks") or {}).get("barcodes"))), (6, bool((st.get("checks") or {}).get("graphics"))),
+            (7, any((st.get("checks") or {}).get(k) for k in ("text_size", "braille", "dieline")))) if on),
         "AI notes": " ".join(ai_info.get("notes") or []) or "—",
-        "Reading order": ", ".join(f"{k}: approved {v['approved']}, test {v['design']}, similarity {v['similarity']}"
+        "Reading order": ", ".join(messages.READING_L.get(lang, messages.READING_L["en"]).format(
+                                       lang=k, a=v["approved"], t=v["design"], s=v["similarity"])
                                    for k, v in res.get("reading_order", {}).items()),
         "Printed": _ts(call.tx.val("SELECT now()")),
         "approved_name": files["ref"]["filename"], "approved_pages": res["approved"]["pages"],
@@ -506,22 +504,31 @@ def export_comparison(call: Call):
     current, _ = _decisions(call, cid)
     dec = {k: {"decision": "confirmed" if v["decision"] == "confirmed" else "rejected", "comment": v["comment"],
                "user": v["user_name"], "at": _ts(v["decided_at"])} for k, v in current.items()}
-    sigs = [{"meaning": s["meaning"].replace("_", " ").capitalize(), "statement": s["statement"], "at": _ts(s["signed_at"]),
-             "user_name": s["user_name"], "reason": s["reason"]} for s in esign.list_for(call, "comparison", cid)]
-    meta = _meta(call, c, res)
+    lang = (call.query.get("lang") or "").lower()
+    if lang not in ("en", "fr", "ar"):
+        u = call.tx.one("SELECT language FROM users WHERE id = %s", call.user["id"]) if call.user else None
+        lang = (u or {}).get("language") or "en"
+        if lang not in ("en", "fr", "ar"):
+            lang = "en"
+    from ..engine import messages
+    mean_l = messages.MEANING_L.get(lang, messages.MEANING_L["en"])
+    sigs = [{"meaning": mean_l.get(s["meaning"], s["meaning"].replace("_", " ").capitalize()), "statement": s["statement"],
+             "at": _ts(s["signed_at"]), "user_name": s["user_name"], "reason": s["reason"]}
+            for s in esign.list_for(call, "comparison", cid)]
+    meta = _meta(call, c, res, lang)
     wd = storage.work_dir(c["tenant_id"], c["id"])
     shots = os.path.join(wd, "shots")
     out_dir = os.path.join(wd, "exports")
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, f"{c['number']}.{fmt}")
+    path = os.path.join(out_dir, f"{c['number']}.{lang}.{fmt}")
     if fmt == "pdf":
-        exports.pdf(res, dec, shots, path, {k: v for k, v in meta.items() if not k.endswith(("_name", "_pages"))}, sigs)
+        exports.pdf(res, dec, shots, path, {k: v for k, v in meta.items() if not k.endswith(("_name", "_pages"))}, sigs, lang)
         mime = "application/pdf"
     elif fmt == "xlsx":
-        exports.excel(res, dec, shots, path, {k: v for k, v in meta.items() if not k.endswith(("_name", "_pages"))})
+        exports.excel(res, dec, shots, path, {k: v for k, v in meta.items() if not k.endswith(("_name", "_pages"))}, lang)
         mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     else:
-        exports.html_report(res, dec, shots, path, meta, sigs)
+        exports.html_report(res, dec, shots, path, meta, sigs, lang)
         mime = "text/html"
     with open(path, "rb") as fh:
         sha = hashlib.sha256(fh.read()).hexdigest()

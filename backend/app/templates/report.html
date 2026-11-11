@@ -182,8 +182,8 @@ main{min-width:0}
   <div>
     <div class="files" style="margin-bottom:10px"><span>{{ meta['Audit ID'] }}</span><span>{{ meta['Company'] }}</span>{% if meta['Reference'] != '—' %}<span>{{ meta['Reference'] }}</span>{% endif %}<span>{{ meta['Completed'] }}</span></div>
     <h1 class="prod">{{ meta['Product'] }}</h1>
-    <div class="files"><span><b>{{ 'المعتمدة' if lang=='ar' else 'Approved' }}</b> {{ meta['approved_name'] }} · {{ meta['approved_pages'] }} pp</span>
-      <span><b>{{ 'التصميم' if lang=='ar' else 'Design' }}</b> {{ meta['design_name'] }}</span></div>
+    <div class="files"><span><b>{{ T.approved }}</b> {{ meta['approved_name'] }} · {{ meta['approved_pages'] }} {{ T.pp }}</span>
+      <span><b>{{ T.design }}</b> {{ meta['design_name'] }}</span></div>
   </div>
   <div class="verdict" id="verdict"><div class="v"></div><div class="why"></div></div>
 </header>
@@ -202,7 +202,7 @@ main{min-width:0}
 
   <main>
     <div class="tools">
-      <input class="search" id="q" type="search" placeholder="Search text, section or ID   ( / )" aria-label="Search findings">
+      <input class="search" id="q" type="search" placeholder="{{ T.search }}" aria-label="{{ T.search }}">
       <button class="chip" data-f="lang" data-v="eng" aria-pressed="false">English</button>
       <button class="chip" data-f="lang" data-v="fra" aria-pressed="false">Français</button>
       <button class="chip" data-f="lang" data-v="ara" aria-pressed="false">العربية</button>
@@ -226,14 +226,14 @@ main{min-width:0}
 
 <footer class="ft">
   {% if sigs %}<div class="sigs">{% for s in sigs %}<div><b>{{ s.user_name }}</b>{{ s.meaning }} · {{ s.at }}</div>{% endfor %}</div>{% endif %}
-  <p>{{ meta['Engine'] and ('Engine ' ~ meta['Engine']) }} · {{ meta['AI models'] }} · Result SHA-256 {{ (meta['Result SHA-256'] or '')[:24] }}… · Generated {{ meta['Printed'] }}</p>
+  <p>{{ meta['Engine'] and (T.engine ~ ' ' ~ meta['Engine']) }} · {{ meta['AI models'] }} · {{ T.resultSha }} {{ (meta['Result SHA-256'] or '')[:24] }}… · {{ T.generated }} {{ meta['Printed'] }}</p>
 </footer>
 
-<dialog id="viewer" aria-label="Side-by-side page viewer">
+<dialog id="viewer" aria-label="{{ T.viewer }}">
   <div class="vbar"><span class="t" id="vt"></span>
     <button class="btn ghost" id="vPrev">‹</button><button class="btn ghost" id="vNext">›</button>
     <button class="btn ghost" id="vOut">−</button><button class="btn ghost" id="vIn">+</button>
-    <button class="btn" id="vClose">Close</button></div>
+    <button class="btn" id="vClose">{{ T.close }}</button></div>
   <div class="vpanes"><div class="vpane" id="vpA"></div><div class="vpane" id="vpD"></div></div>
 </dialog>
 
@@ -242,23 +242,12 @@ main{min-width:0}
 (() => {
 const D = JSON.parse(document.getElementById('data').textContent);
 const MODE = D.mode, AR = D.lang === 'ar';
-const L = AR ? {
-  steps:['مراجعة النشرة المعتمدة','مقارنة المحتوى','الترقيم والطباعة'], stepsSub:['الأخطاء العلمية والتناقضات','كل كلمة بالإنجليزية والعربية','علامات الترقيم والمسافات والأرقام'],
-  excluded:'المستبعد من المقارنة', sections:'الأقسام', all:'كل الأقسام', pending:'بدون قرار', noise:'عرض أخطاء القراءة', expand:'فتح الكل', collapse:'إغلاق الكل',
-  shown:n=>`${n} معروض`, approved:'المعتمدة', design:'التصميم', map:'خريطة النشرة', mapD:'التصميم', mapA:'المعتمدة', hint:'كل نقطة ملاحظة. اضغط للانتقال إليها.',
-  what:'ما الذي تغير', why:'لماذا يهم', act:'الإجراء المطلوب', confirm:'تأكيد الانحراف', reject:'ليس انحرافاً', reason:'السبب (مطلوب عند الرفض)', none:'لا توجد صورة',
-  crit:'حرج', major:'رئيسي', minor:'ثانوي', info:'خطأ قراءة محتمل', st:{pending:'بانتظار القرار',confirmed:'مؤكد',rejected:'مرفوض'},
-  notReady:'غير جاهز للطباعة', wip:'المراجعة جارية', ready:'جاهز للطباعة', empty:'لا توجد ملاحظات بهذه المعايير.',
-  key:['محذوف من التصميم','مضاف في التصميم','نص مفقود'], open:'افتح الصفحات جنباً إلى جنب'
-} : {
-  steps:['Approved leaflet audit','Content comparison','Punctuation & typography'], stepsSub:['Scientific errors and contradictions','Every word, English and Arabic','Punctuation, spacing, digit style'],
-  excluded:'Excluded from comparison', sections:'Sections', all:'All sections', pending:'Undecided', noise:'Show OCR noise', expand:'Expand all', collapse:'Collapse all',
-  shown:n=>`${n} shown`, approved:'Approved', design:'Design', map:'Pack map', mapD:'Design', mapA:'Approved', hint:'Each dot is a finding. Click one to jump to it.',
-  what:'What changed', why:'Why it matters', act:'Action', confirm:'Confirm deviation', reject:'Not a deviation', reason:'Reason (required to reject)', none:'No screenshot',
-  crit:'Critical', major:'Major', minor:'Minor', info:'OCR noise', st:{pending:'Awaiting decision',confirmed:'Confirmed',rejected:'Rejected'},
-  notReady:'Not ready for print', wip:'Review in progress', ready:'Ready for print', empty:'No findings match these filters.',
-  key:['Approved only — removed in design','Design only — added','Missing text belongs here'], open:'Open pages side by side'
-};
+const T = D.labels || {};
+const fill = (x, v) => String(x || '').replace(/\{(\w+)\}/g, (m, k) => (k in v ? v[k] : m));
+const L = Object.assign({}, T, {
+  shown: n => fill(T.shown, {n}), mapD: T.design, mapA: T.approved,
+  steps: T.steps || {}, stepsSub: T.stepsSub || {},
+});
 const SEV = ['critical','major','minor','info'], SEVL = {critical:L.crit,major:L.major,minor:L.minor,info:L.info};
 const SEVC = {critical:'var(--crit)',major:'var(--major)',minor:'var(--minor)',info:'var(--noise)'};
 const F = D.findings, DEC = D.decisions;
@@ -281,13 +270,11 @@ function verdict(){
   if (crit.length || maj.length) {
     el.querySelector('.v').textContent = pend ? (confC ? L.notReady : L.wip) : L.notReady;
     if (pend && !confC) el.classList.add('wip');
-    el.querySelector('.why').textContent = AR
-      ? `${crit.length} حرج، ${maj.length} رئيسي مفتوح · ${pend} بانتظار القرار`
-      : `${crit.length} critical and ${maj.length} major open · ${pend} awaiting a decision`;
+    el.querySelector('.why').textContent = fill(L.whyOpen, {c: crit.length, m: maj.length, p: pend});
   } else {
     el.classList.add(pend ? 'wip' : 'ok');
     el.querySelector('.v').textContent = pend ? L.wip : L.ready;
-    el.querySelector('.why').textContent = AR ? `${pend} بانتظار القرار` : `${pend} awaiting a decision`;
+    el.querySelector('.why').textContent = fill(L.whyPend, {p: pend});
   }
   const counts = SEV.map(s => F.filter(f => f.severity===s && dec(f)!=='rejected').length);
   const tot = counts.reduce((a,b)=>a+b,0) || 1;
@@ -300,9 +287,10 @@ function verdict(){
 /* ---------- steps + sections */
 function visibleBase(){return F.filter(f => f.step===state.step && (state.noise || f.severity!=='info') && (!state.lang || f.lang===state.lang))}
 function renderSteps(){
-  const b = [1,2,3].map(s => {
+  const levels = [...new Set([1,2,3, ...F.map(f=>f.step)])].sort((a,b)=>a-b);
+  const b = levels.map(s => {
     const n = F.filter(f=>f.step===s && f.severity!=='info').length;
-    return `<button data-step="${s}" class="${state.step===s?'on':''}" aria-current="${state.step===s}">${L.steps[s-1]}<span class="n">${n}</span><small>${L.stepsSub[s-1]}</small></button>`;
+    return `<button data-step="${s}" class="${state.step===s?'on':''}" aria-current="${state.step===s}">${esc(L.steps[s]||('Level '+s))}<span class="n">${n}</span><small>${esc(L.stepsSub[s]||'')}</small></button>`;
   });
   b.push(`<button data-step="x" class="${state.step==='x'?'on':''}">${L.excluded}<span class="n">${D.exclusions.length}</span></button>`);
   $('#steps').innerHTML = b.join('');
@@ -356,7 +344,7 @@ function shotHTML(f, side){
   if (!has || (D.images && !D.images[name])) return `<div class="shot">${lab}<div class="none">${L.none}</div></div>`;
   const ocr = side==='a' ? f.ref_text : f.des_text;
   return `<div class="shot">${lab}<button data-view="${f.id}" aria-label="${L.open}"><img loading="lazy" alt="" src="${img(name)}"></button>
-    ${ocr?`<div class="ocr ${isAr(ocr)?'ar':''}">OCR: ${esc(ocr.slice(0,300))}</div>`:''}</div>`;
+    ${ocr?`<div class="ocr ${isAr(ocr)?'ar':''}" dir="auto">OCR: ${esc(ocr.slice(0,300))}</div>`:''}</div>`;
 }
 function decideHTML(f){
   const d = DEC[f.id];
@@ -368,14 +356,15 @@ function decideHTML(f){
 }
 function card(f){
   const ar = f.lang==='ara', d = dec(f);
-  const ai = f.ai && f.ai.verdict ? `<div class="ai"><b>AI · ${esc(f.ai.verdict.replace('_',' '))}</b>${f.ai.approved_reads?` — approved reads “${esc(f.ai.approved_reads)}”, design reads “${esc(f.ai.design_reads)}”.`:''} ${esc(f.ai.explanation||'')}</div>` : '';
+  const aiv = (L.aiv||{})[f.ai && f.ai.verdict] || (f.ai && f.ai.verdict ? f.ai.verdict.replace('_',' ') : '');
+  const ai = f.ai && f.ai.verdict ? `<div class="ai"><b>${esc(T.ai||'AI')} · ${esc(aiv)}</b>${f.ai.approved_reads?' '+esc(fill(L.aiReads,{a:f.ai.approved_reads,d:f.ai.design_reads||''})):''} ${esc(f.ai.explanation||'')}</div>` : '';
   const twoSides = f.step !== 1;
   return `<article class="dev ${state.expandAll||state.active===f.id?'open':''} ${state.active===f.id?'active':''}" data-sev="${f.severity}" id="f-${f.id}">
     <button class="row" data-toggle="${f.id}" aria-expanded="${state.expandAll||state.active===f.id}">
       <span class="sevtag">${SEVL[f.severity]}</span>
       <span class="ttl" dir="auto">${esc(f.title)}</span>
       <span class="state ${d}">${L.st[d]}</span>
-      <span class="meta"><span>${f.id}</span><span dir="auto">${esc(f.section||'—')}</span><span>${esc(f.category||'')}</span><span>${ar?'العربية':'English'}</span></span>
+      <span class="meta"><span>${f.id}</span><span dir="auto">${esc(f.section||'—')}</span><span>${esc(f.category||'')}</span><span>${esc((L.langs||{})[f.lang]||f.lang)}</span></span>
       <span class="peek ${isAr(peekText(f))?'ar':''}">${esc(peekText(f))}</span>
     </button>
     <div class="body">
@@ -397,7 +386,7 @@ function renderList(){
   bindList(); renderPins();
 }
 function renderExcluded(){
-  $('#excluded').innerHTML = `<table class="ex"><thead><tr><th>${AR?'المستند':'Document'}</th><th>${AR?'صفحة':'Page'}</th><th>${AR?'السبب':'Reason'}</th><th>${AR?'النص':'Text'}</th></tr></thead><tbody>`+
+  $('#excluded').innerHTML = `<table class="ex"><thead><tr><th>${esc(L.doc)}</th><th>${esc(L.page)}</th><th>${esc(L.reasonCol)}</th><th>${esc(L.text)}</th></tr></thead><tbody>`+
     D.exclusions.map(e=>`<tr><td>${e.doc==='approved'?L.approved:L.design}</td><td>${e.page+1}</td><td>${esc(e.reason)}</td><td dir="auto" style="color:var(--ink3)">${esc((e.text||'').slice(0,180))}</td></tr>`).join('')+'</tbody></table>';
 }
 function bindList(){

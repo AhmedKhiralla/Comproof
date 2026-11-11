@@ -371,6 +371,9 @@ def test_french_comparison(acme):
     assert res["reading_order"].get("fra"), res["reading_order"]
     fra = [x for x in res["findings"] if x["lang"] == "fra"]
     assert fra, [x["lang"] for x in res["findings"]]
+    # Level 1 findings on a French master are French findings, not English
+    assert all(x["lang"] == "fra" for x in res["findings"] if x["step"] == 1), \
+        [(x["id"], x["lang"]) for x in res["findings"] if x["step"] == 1]
     # 2,5 -> 5 in the composition: a changed number, critical
     numeric = [x for x in fra if x["kind"] == "numeric" and "5" in x["des_text"] and "2.5" in x["ref_text"].replace(",", ".")]
     assert numeric and numeric[0]["severity"] == "critical", [(x["kind"], x["ref_text"], x["des_text"]) for x in fra]
@@ -383,3 +386,40 @@ def test_french_comparison(acme):
     # findings carry a message key and parameters, so the UI can say them in the viewer's language
     assert numeric[0]["key"] == "txt.numeric" and numeric[0]["params"]["ref"], numeric[0]
     assert all("key" in x and "params" in x for x in res["findings"])
+
+    # exports in the reader's language: French labels and finding texts, the document text unchanged
+    import io as _io, zipfile
+    st, pdfb, _ = reviewer.get(f"/api/comparisons/{c['id']}/export.pdf?lang=fr", raw=True)
+    assert st == 200 and pdfb[:4] == b"%PDF"
+    from pypdf import PdfReader
+    txt = " ".join(" ".join(pg.extract_text() or "" for pg in PdfReader(_io.BytesIO(pdfb)).pages).split())
+    for want in ("Rapport de comparaison", "Synthèse", "Nombre modifié", "Ce qui a changé", "Épreuve de maquette"):
+        assert want in txt, (want, txt[:600])
+    # the quoted document text is the material's own, unchanged
+    assert " ".join(numeric[0]["des_text"].split()) in txt, numeric[0]["des_text"]
+    assert "What changed" not in txt and "Number changed" not in txt
+    st, xl, _ = reviewer.get(f"/api/comparisons/{c['id']}/export.xlsx?lang=fr", raw=True)
+    assert st == 200
+    import openpyxl
+    wb = openpyxl.load_workbook(_io.BytesIO(xl))
+    shared = " ".join(str(v) for ws in wb.worksheets for row in ws.iter_rows(values_only=True) for v in row if v)
+    shared += " " + " ".join(wb.sheetnames)
+    for want in ("Gravité", "Ce qui a changé", "Nombre modifié", "Critique", "Constats"):
+        assert want in shared, want
+    st, html, _ = reviewer.get(f"/api/comparisons/{c['id']}/export.html?lang=fr", raw=True)
+    import json as _json
+
+    def embedded(h):
+        h = h.decode()
+        a = h.index('<script id="data" type="application/json">') + len('<script id="data" type="application/json">')
+        return h, _json.loads(h[a:h.index("</script>", a)])
+    html, data = embedded(html)
+    assert st == 200 and 'lang="fr"' in html and "Rechercher un texte" in html
+    assert data["labels"]["info"] == "Bruit OCR" and data["labels"]["steps"]["2"].startswith("Niveau 2")
+    titles = [f["title"] for f in data["findings"]]
+    assert any(t_.startswith("Nombre modifié") for t_ in titles), titles
+    assert "Search text, section or ID" not in html
+    st, html_en, _ = reviewer.get(f"/api/comparisons/{c['id']}/export.html?lang=en", raw=True)
+    _, data_en = embedded(html_en)
+    assert any(f["title"].startswith("Number changed") or f["kind"] != "numeric" for f in data_en["findings"])
+    assert data_en["labels"]["info"] == "OCR noise"

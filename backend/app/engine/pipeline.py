@@ -202,7 +202,13 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                                                               settings.get("reply_lang") or "en")
                 for k, it in enumerate(issues, 1):
                     sev = it.get("severity") if it.get("severity") in ("critical", "major", "minor") else "minor"
-                    lang = {"ar": "ara", "fr": "fra"}.get(it.get("language"), "eng")
+                    lang = {"ar": "ara", "fr": "fra", "en": "eng"}.get(it.get("language"), "")
+                    present = sorted((lg for lg in texts if texts[lg].strip()), key=lambda lg: -len(texts[lg]))
+                    if lang not in present:
+                        # "both", missing, or a language the material does not carry: the material's main language,
+                        # Latin first for a bilingual leaflet
+                        latin = [lg for lg in present if lg != "ara"]
+                        lang = (latin or present or ["eng"])[0]
                     regs = [r for r in ref_regions if r.lang == lang] or ref_regions
                     f = compare.Finding(f"A{k}", 1, lang, "ai_science", sev, str(it.get("problem", "AI finding"))[:200],
                                         str(it.get("quote", "")), "", _locate(regs, str(it.get("quote", ""))), [], 1.0,

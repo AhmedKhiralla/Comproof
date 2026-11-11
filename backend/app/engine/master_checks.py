@@ -36,10 +36,22 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
     lines = list(_lines(ref_regions))
     out: list[Finding] = []
     n = start_id
+    # each finding carries the language of the line it points to; document-wide ones the main Latin language
+    lang_at, count = {}, {}
+    for r in ref_regions:
+        if r.lang in ("eng", "fra"):
+            for ln in r.lines:
+                lang_at[(r.page, tuple(int(v) for v in ln.box))] = r.lang
+            count[r.lang] = count.get(r.lang, 0) + len(r.lines)
+    doc_lang = max(count, key=count.get) if count else "eng"
 
     def add(kind, sev, title, text, loc, note="", key="", params=None):
         nonlocal n
-        f = Finding(f"M{n}", 1, "eng", kind, sev, title, text, "", loc, [], 1.0, True, None, note)
+        lg = doc_lang
+        for pg, box in loc or []:
+            lg = lang_at.get((pg, tuple(int(v) for v in box)), lg)
+            break
+        f = Finding(f"M{n}", 1, lg, kind, sev, title, text, "", loc, [], 1.0, True, None, note)
         f.key, f.params = key, params or {}
         out.append(f)
         n += 1
