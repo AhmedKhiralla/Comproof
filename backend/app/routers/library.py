@@ -185,7 +185,7 @@ class ComponentIn(BaseModel):
     code: str = Field(min_length=1, max_length=40)
     kind: Literal["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"]
     name: str = Field(min_length=1, max_length=200)
-    languages: list[Literal["en", "ar"]] = Field(default_factory=lambda: ["en", "ar"], min_length=1)
+    languages: list[Literal["en", "ar", "fr"]] = Field(default_factory=lambda: ["en", "ar"], min_length=1)
     market: str | None = Field(default=None, pattern=r"^[A-Za-z]{2}$")
     notes: str | None = Field(default=None, max_length=1000)
     _c = field_validator("code")(_code)
@@ -193,7 +193,7 @@ class ComponentIn(BaseModel):
 
 class ComponentPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    languages: list[Literal["en", "ar"]] | None = None
+    languages: list[Literal["en", "ar", "fr"]] | None = None
     market: str | None = Field(default=None, pattern=r"^[A-Za-z]{0,2}$")
     notes: str | None = Field(default=None, max_length=1000)
     active: bool | None = None

@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Tesseract with English and Arabic, complex-script shaping, fonts for the reports, LibreOffice for Word files.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara libraqm0 libzbar0 \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-ara tesseract-ocr-fra libraqm0 libzbar0 \
       fonts-dejavu-core fonts-noto-core fonts-hosny-amiri \
       libreoffice-writer-nogui \
  && rm -rf /var/lib/apt/lists/*

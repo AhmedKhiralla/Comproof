@@ -1,8 +1,8 @@
 // Language (English / Arabic with right-to-left layout) and locale-aware formatting.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ar, en, type StringKey } from "./strings";
+import { ar, en, fr, type StringKey } from "./strings";
 
-export type Lang = "en" | "ar";
+export type Lang = "en" | "ar" | "fr";
 
 type Vars = Record<string, string | number>;
 
@@ -23,7 +23,7 @@ interface I18n {
   countryName: (code: string) => string;
 }
 
-const dicts: Record<Lang, Record<string, string>> = { en, ar };
+const dicts: Record<Lang, Record<string, string>> = { en, ar, fr };
 
 function fill(s: string, vars?: Vars) {
   if (!vars) return s;
@@ -33,7 +33,7 @@ function fill(s: string, vars?: Vars) {
 function readLang(): Lang | null {
   try {
     const v = localStorage.getItem("cp.lang");
-    if (v === "en" || v === "ar") return v;
+    if (v === "en" || v === "ar" || v === "fr") return v;
   } catch { /* ignore */ }
   return null;
 }
@@ -41,7 +41,7 @@ function readLang(): Lang | null {
 const Ctx = createContext<I18n>(null as unknown as I18n);
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(() => readLang() ?? (navigator.language?.startsWith("ar") ? "ar" : "en"));
+  const [lang, setLangState] = useState<Lang>(() => readLang() ?? (navigator.language?.startsWith("ar") ? "ar" : navigator.language?.startsWith("fr") ? "fr" : "en"));
   const dir = lang === "ar" ? "rtl" : "ltr";
 
   useEffect(() => {
@@ -56,7 +56,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<I18n>(() => {
     // Latin digits in Arabic keep codes, quantities and dates easy to compare in plant documents.
-    const locale = lang === "ar" ? "ar-EG-u-nu-latn" : "en-GB";
+    const locale = lang === "ar" ? "ar-EG-u-nu-latn" : lang === "fr" ? "fr-FR" : "en-GB";
     const dict = dicts[lang];
     const fmtCache = new Map<string, Intl.DateTimeFormat>();
     const fmt = (tz: string | undefined, withTime: boolean) => {

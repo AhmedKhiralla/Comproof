@@ -241,21 +241,22 @@ Check:
 2. Dosage-form wording used consistently (e.g. film vs tablet).
 3. Contraindications vs warnings vs interactions consistency; section cross-references.
 4. Pharmacokinetic values, ATC code format, storage conditions.
-5. English vs Arabic: same meaning (dose, timing with food, warnings), drug names spelled correctly in Arabic,
-   missing words in Arabic headings, numbers identical.
+5. Between languages: same meaning (dose, timing with food, warnings), drug names transliterated or
+   translated correctly, missing words in translated headings, numbers identical in every language.
 Report only real problems. Quote the exact text.
-Return JSON: {{"issues": [{{"severity": "critical|major|minor", "language": "en|ar|both", "section": "...",
+Return JSON: {{"issues": [{{"severity": "critical|major|minor", "language": "en|fr|ar|both", "section": "...",
 "quote": "short exact text", "problem": "...", "suggestion": "..."}}]}}
+("language" = the language of the quoted text; "both" when the problem spans languages.)
 
-ENGLISH TEXT:
-{eng}
+{texts}"""
 
-ARABIC TEXT:
-{ara}"""
+SCIENCE_HEADERS = {"eng": ("ENGLISH TEXT", 60000), "fra": ("FRENCH TEXT", 60000), "ara": ("ARABIC TEXT", 30000)}
 
 
-def science(provider: Provider, eng: str, ara: str, kind: str) -> tuple[str, list]:
-    msg = SCIENCE_PROMPT.format(eng=eng[:60000], ara=ara[:30000], kind=kind)
+def science(provider: Provider, texts: dict[str, str], kind: str) -> tuple[str, list]:
+    parts = [f"{SCIENCE_HEADERS[lg][0]}:\n{(texts.get(lg) or '').strip()[:SCIENCE_HEADERS[lg][1]]}"
+             for lg in ("eng", "fra", "ara") if (texts.get(lg) or "").strip()]
+    msg = SCIENCE_PROMPT.format(kind=kind, texts="\n\n".join(parts) or "TEXT:\n(empty)")
     out = chat(provider, provider.text_model, [{"role": "user", "content": msg}], max_tokens=4000, timeout=240)
     return out["model"], out["data"].get("issues") or []
 

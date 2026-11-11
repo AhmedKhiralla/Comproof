@@ -13,20 +13,20 @@ from .compare import Finding
 
 DOSAGE_FORMS = {
     "film": ["film", "strip"],
-    "tablet": ["tablet", "tablets"],
-    "capsule": ["capsule", "capsules"],
-    "syrup": ["syrup"],
+    "tablet": ["tablet", "tablets", "comprimé", "comprimés"],
+    "capsule": ["capsule", "capsules", "gélule", "gélules"],
+    "syrup": ["syrup", "sirop"],
     "suspension": ["suspension"],
-    "injection": ["injection", "vial", "ampoule"],
+    "injection": ["injection", "vial", "ampoule", "injectable", "flacon"],
 }
 
 SMPC_SECTIONS = ["1", "2", "3", "4.1", "4.2", "4.3", "4.4", "4.5", "4.6", "4.7", "4.8", "4.9",
                  "5.1", "5.2", "5.3", "6.1", "6.2", "6.3", "6.4", "6.5", "6.6", "7"]
 
 
-def _lines(regions, lang="eng"):
+def _lines(regions, langs=("eng", "fra")):
     for r in regions:
-        if r.lang != lang:
+        if r.lang not in langs:
             continue
         for ln in r.lines:
             yield r.page, ln
@@ -58,9 +58,12 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
                     return cand
         return v
 
-    # 1. Strength stated vs. quantity in composition ("Each X 2.5mg ... contains 5 mg")
+    # 1. Strength stated vs. quantity in composition ("Each X 2.5mg ... contains 5 mg" /
+    #    "Chaque comprimé de X 2,5 mg ... contient 5 mg")
     for p, ln in lines:
-        m = re.search(r"each\s+\S+\s+([\d.,]+)\s*mg.{0,60}?contains?\s+([\d.,]+)\s*mg", ln.text, re.I)
+        m = (re.search(r"each\s+\S+\s+([\d.,]+)\s*mg.{0,60}?contains?\s+([\d.,]+)\s*mg", ln.text, re.I)
+             or re.search(r"chaque\s+\S+(?:\s+\S+){0,3}?\s+([\d.,]+)\s*mg.{0,60}?contient\s+([\d.,]+)\s*mg",
+                          ln.text, re.I))
         if m:
             a, b = fix(m.group(1)), fix(m.group(2))
             try:
@@ -99,7 +102,7 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
 
     # 4. ATC code format (letter, 2 digits, 2 letters, 2 digits)
     for p, ln in lines:
-        m = re.search(r"ATC\s*code\s*[:\-]?\s*([A-Z0-9]{3,9})", ln.text, re.I)
+        m = re.search(r"(?:ATC\s*code|code\s*ATC)\s*[:\-]?\s*([A-Z0-9]{3,9})", ln.text, re.I)
         if m and not re.fullmatch(r"[A-Z]\d{2}[A-Z]{2}\d{2}", m.group(1).upper()):
             add("data", "major", f"ATC code '{m.group(1)}' is not a complete 7-character code",
                 ln.text, [(p, ln.box)])
@@ -107,7 +110,7 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
     # 5. SmPC section numbering present and in order
     found = []
     for p, ln in lines:
-        m = re.match(r"\s*(\d(?:\.\d)?)\.?\s+[A-Z]", ln.text)
+        m = re.match(r"\s*(\d(?:\.\d)?)\.?\s+[A-ZÀ-Þ]", ln.text)
         if m:
             found.append(m.group(1))
     missing = [s for s in SMPC_SECTIONS if s not in found]
@@ -117,6 +120,8 @@ def run(ref_regions, start_id: int = 1, known_strengths: list[str] | None = None
 
     # 6. Maximum dose stated consistently
     maxes = re.findall(r"maximum (?:recommended )?(?:daily )?dose is\s*([\d.]+)\s*mg", text_all, re.I)
+    maxes += [v.replace(",", ".") for v in
+              re.findall(r"dose (?:quotidienne )?maximale(?: recommandée)? est de\s*([\d.,]+)\s*mg", text_all, re.I)]
     if len(set(maxes)) > 1:
         add("consistency", "critical", "Maximum dose stated with different values",
             ", ".join(sorted(set(maxes))) + " mg", [])

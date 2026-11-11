@@ -174,7 +174,7 @@ def test_settings_roundtrip(two_companies):
     assert status == 200 and s2["features"]["ai_reading"] is True
     status, s3, _ = admin.put("/api/settings/terminology",
                               {"terminology": {"supplier": {"en": "Printer", "ar": "المطبعة"}}})
-    assert status == 200 and s3["terminology"]["supplier"] == {"en": "Printer", "ar": "المطبعة"}
+    assert status == 200 and s3["terminology"]["supplier"] == {"en": "Printer", "ar": "المطبعة", "fr": "Imprimeur"}
     assert [p["name"] for p in s3["ai_providers"]] == ["qwen"]
     status, s4, _ = admin.put("/api/settings/engine", {"provider": "groq", "exclude_phrases": []})
     assert status == 422  # not configured on this server

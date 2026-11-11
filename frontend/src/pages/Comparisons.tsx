@@ -108,7 +108,7 @@ export function NewComparison() {
   const sites = (me?.sites ?? []).filter((s) => startAt(s.id));
   const [f, setF] = useState({
     site_id: sites.find((s) => s.id === siteId)?.id ?? sites[0]?.id ?? "", component_id: preset, title: "",
-    purpose: qp.get("review") ? "master_review" : "proof", kind: "leaflet", supplier: "", reference_no: "", eng: true, ara: true, step1: true, step3: true,
+    purpose: qp.get("review") ? "master_review" : "proof", kind: "leaflet", supplier: "", reference_no: "", eng: true, fra: false, ara: true, step1: true, step3: true,
     mirror: false, rotated: "", aiRead: !!me?.tenant?.ai.read, text: true, sample_source: "scan",
   });
   const feat = me?.tenant?.features ?? {};
@@ -122,7 +122,7 @@ export function NewComparison() {
   const [general, setGeneral] = useState<string | null>(null);
   const comp = useMemo(() => comps.data?.items.find((c) => c.id === f.component_id) ?? null, [comps.data, f.component_id]);
   useEffect(() => {
-    if (comp) setF((s) => ({ ...s, kind: comp.kind, eng: comp.languages.includes("en"), ara: comp.languages.includes("ar"),
+    if (comp) setF((s) => ({ ...s, kind: comp.kind, eng: comp.languages.includes("en"), fra: comp.languages.includes("fr"), ara: comp.languages.includes("ar"),
       title: s.title || `${comp.product_name} · ${comp.name}`, mirror: comp.kind === "blister_foil" ? s.mirror : false }));
   }, [comp]);
   const useMaster = !!comp?.artwork_id && !customRef;
@@ -135,7 +135,7 @@ export function NewComparison() {
       const r = await post<{ id: string }>("/api/comparisons", {
         site_id: f.site_id, title: f.title, purpose: f.purpose, component_id: f.component_id || null,
         reference_file_id: useMaster ? null : ref?.id ?? null, test_file_id: review ? null : test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
-        kind: f.kind || null, languages: [f.eng && "eng", f.ara && "ara"].filter(Boolean), step1: f.step1, step3: f.step3,
+        kind: f.kind || null, languages: [f.eng && "eng", f.fra && "fra", f.ara && "ara"].filter(Boolean), step1: f.step1, step3: f.step3,
         mirror_test: f.mirror, rotated_text: f.rotated || null, ai_read: f.aiRead, text: textOn,
         ...checks, sample_source: spectroTest ? "spectro" : f.sample_source,
       });
@@ -201,6 +201,7 @@ export function NewComparison() {
             <div className="feature"><div className="text"><strong>{t("new.languages")}</strong><span>{t("new.languagesHint")}</span></div>
               <div className="row">
                 <label className="row small"><input type="checkbox" checked={f.eng} onChange={(e) => setF({ ...f, eng: e.target.checked })} />{t("common.english")}</label>
+                <label className="row small"><input type="checkbox" checked={f.fra} onChange={(e) => setF({ ...f, fra: e.target.checked })} />{t("common.french")}</label>
                 <label className="row small"><input type="checkbox" checked={f.ara} onChange={(e) => setF({ ...f, ara: e.target.checked })} />{t("common.arabic")}</label>
               </div></div>
             {!review && <div className="feature"><div className="text"><strong>{t("new.text")}</strong><span>{t(spectroTest ? "new.textSpectro" : "new.textHint")}</span></div>
@@ -253,7 +254,7 @@ export function NewComparison() {
           </div>
         </section>
         <div className="row">
-          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={(!review && !test) || (!useMaster && !ref) || !f.title || (textOn && !f.eng && !f.ara)}>{t(review ? "review.start" : "new.start")}</Button>
+          <Button type="submit" variant="primary" icon={<LuPlay />} busy={busy} disabled={(!review && !test) || (!useMaster && !ref) || !f.title || (textOn && !f.eng && !f.fra && !f.ara)}>{t(review ? "review.start" : "new.start")}</Button>
           <Button variant="ghost" onClick={() => history.back()}>{t("common.cancel")}</Button>
         </div>
       </form>

@@ -141,7 +141,7 @@ function ComponentSheet({ productId, component, onClose, onSaved }: {
   const toast = useToast();
   const [f, setF] = useState({
     code: component?.code ?? "", kind: component?.kind ?? "leaflet", name: component?.name ?? "",
-    en: component ? component.languages.includes("en") : true, ar: component ? component.languages.includes("ar") : true,
+    en: component ? component.languages.includes("en") : true, fr: component ? component.languages.includes("fr") : false, ar: component ? component.languages.includes("ar") : true,
     market: component?.market ?? "", notes: component?.notes ?? "", active: component?.active ?? true,
   });
   const [busy, setBusy] = useState(false);
@@ -149,7 +149,7 @@ function ComponentSheet({ productId, component, onClose, onSaved }: {
   const [general, setGeneral] = useState<string | null>(null);
   const submit = async () => {
     setBusy(true); setErrs({}); setGeneral(null);
-    const languages = [f.en && "en", f.ar && "ar"].filter(Boolean);
+    const languages = [f.en && "en", f.fr && "fr", f.ar && "ar"].filter(Boolean);
     try {
       const r = component
         ? await patch<ComponentDetail>(`/api/components/${component.id}`, { name: f.name, languages, market: f.market, notes: f.notes, active: f.active })
@@ -171,6 +171,7 @@ function ComponentSheet({ productId, component, onClose, onSaved }: {
         <legend className="label-like">{t("lib.comp.languages")}</legend>
         <div className="row">
           <label className="row small"><input type="checkbox" checked={f.en} onChange={(e) => setF({ ...f, en: e.target.checked })} />{t("common.english")}</label>
+          <label className="row small"><input type="checkbox" checked={f.fr} onChange={(e) => setF({ ...f, fr: e.target.checked })} />{t("common.french")}</label>
           <label className="row small"><input type="checkbox" checked={f.ar} onChange={(e) => setF({ ...f, ar: e.target.checked })} />{t("common.arabic")}</label>
         </div>
         {errs.languages && <div className="error">{errs.languages}</div>}
@@ -301,7 +302,7 @@ export function ComponentPage({ componentId }: { componentId: string }) {
       const r = await post<{ id: string }>("/api/comparisons", {
         site_id: reviewSite, purpose: "master_review", component_id: data.id, artwork_version_id: v.id,
         title: `${data.product_code} ${data.code} v${v.version} · ${t("review.titleSuffix")}`,
-        languages: data.languages.map((l) => (l === "ar" ? "ara" : "eng")),
+        languages: data.languages.map((l) => (l === "ar" ? "ara" : l === "fr" ? "fra" : "eng")),
       });
       navigate(`/comparisons/${r.id}`);
     } catch (e) { toast(errorText(e, t)); setReviewing(null); }

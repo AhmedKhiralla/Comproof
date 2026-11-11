@@ -98,7 +98,7 @@ class ComparisonIn(BaseModel):
     supplier: str | None = Field(default=None, max_length=120)
     reference_no: str | None = Field(default=None, max_length=80)
     kind: Literal["leaflet", "carton", "label", "sachet", "blister_foil", "tube", "other"] | None = None
-    languages: list[Literal["eng", "ara"]] = Field(default_factory=lambda: ["eng", "ara"], min_length=1)
+    languages: list[Literal["eng", "ara", "fra"]] = Field(default_factory=lambda: ["eng", "ara"], min_length=1)
     step1: bool = True
     step3: bool = True
     mirror_test: bool = False

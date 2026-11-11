@@ -39,12 +39,12 @@ def sha256(path: str) -> str:
     return h.hexdigest()
 
 
-def _analyse(doc: ingest.Document, phrases, progress, label, rotated, reader, check):
+def _analyse(doc: ingest.Document, phrases, progress, label, rotated, reader, check, latin="eng"):
     regions, exclusions = [], []
     workers = 2 if reader else min(4, os.cpu_count() or 2)
     with ThreadPoolExecutor(max_workers=workers) as ex:
         futs = [ex.submit(layout.analyse_page, p.image, p.index, phrases, text_words=p.words,
-                          rotated=rotated, reader=reader) for p in doc.pages]
+                          rotated=rotated, reader=reader, latin=latin) for p in doc.pages]
         for i, f in enumerate(futs):
             regs, exc, _ = f.result()
             regions += regs
@@ -100,7 +100,7 @@ def crop(doc: ingest.Document, loc: list, hl: list, anchor: list, colour, pad: i
 
 def _enrich_step1(findings, ref_regions):
     """Give Step 1 findings a section, location and action like the others."""
-    toks = compare.tokens_from_regions(ref_regions, "eng")
+    toks = compare.tokens_from_regions(ref_regions, "eng") + compare.tokens_from_regions(ref_regions, "fra")
     actions = {
         "consistency": "Correct the approved leaflet through change control before it is used as the master.",
         "data": "Verify against the source reference (WHO ATC index / originator SmPC) and correct the master.",
@@ -141,6 +141,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     kind = settings.get("kind") or "leaflet"
     languages = settings.get("languages") or ["eng", "ara"]
+    latin = "+".join(l for l in ("eng", "fra") if l in languages) or "eng"
     phrases = layout.DEFAULT_EXCLUDE_PHRASES + [p.lower() for p in settings.get("exclude_phrases", [])]
     rotated = settings.get("rotated_text") or "auto"
     if rotated == "auto":
@@ -174,8 +175,8 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         from .ai_read import make_reader
         reader = make_reader(read_p, read_stats, threading.Lock())
     if do_text:
-        ref_regions, ref_ex = _analyse(ref, phrases, progress, "Approved", rotated, reader, check)
-        des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check) \
+        ref_regions, ref_ex = _analyse(ref, phrases, progress, "Approved", rotated, reader, check, latin)
+        des_regions, des_ex = _analyse(des, phrases, progress, "Design", rotated, reader, check, latin) \
             if not review_only else ([], [])
     else:
         ref_regions, ref_ex, des_regions, des_ex = [], [], [], []
@@ -195,12 +196,12 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         if review_p and ai_cfg.get("science"):
             progress("Level 1: AI scientific review")
             try:
-                eng = "\n".join(l.text for r in ref_regions if r.lang == "eng" for l in r.lines)
-                ara = "\n".join(l.text for r in ref_regions if r.lang == "ara" for l in r.lines)
-                ai_info["science_model"], issues = ai.science(review_p, eng, ara, KIND_LABELS.get(kind, kind))
+                texts = {lg: "\n".join(l.text for r in ref_regions if r.lang == lg for l in r.lines)
+                         for lg in ("eng", "fra", "ara")}
+                ai_info["science_model"], issues = ai.science(review_p, texts, KIND_LABELS.get(kind, kind))
                 for k, it in enumerate(issues, 1):
                     sev = it.get("severity") if it.get("severity") in ("critical", "major", "minor") else "minor"
-                    lang = "ara" if it.get("language") == "ar" else "eng"
+                    lang = {"ar": "ara", "fr": "fra"}.get(it.get("language"), "eng")
                     regs = [r for r in ref_regions if r.lang == lang] or ref_regions
                     f = compare.Finding(f"A{k}", 1, lang, "ai_science", sev, str(it.get("problem", "AI finding"))[:200],
                                         str(it.get("quote", "")), "", _locate(regs, str(it.get("quote", ""))), [], 1.0,
@@ -216,10 +217,13 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     # ---- Levels 2 and 3, per language
     order = {}
-    for lang in [l for l in ("eng", "ara") if l in languages and do_text and not review_only]:
+    for lang in [l for l in ("eng", "fra", "ara") if l in languages and do_text and not review_only]:
+        label = compare.LANG_LABELS[lang]
         if ref.plain_text is not None:
-            a = compare.tokens_from_text("\n".join(l for l in ref.plain_text.splitlines()
-                                                   if compare.is_arabic(l) == (lang == "ara")), lang)
+            lines = [l for l in ref.plain_text.splitlines() if compare.is_arabic(l) == (lang == "ara")]
+            if lang != "ara" and "+" in latin:      # a docx master carrying both English and French
+                lines = [l for l in lines if not l.strip() or layout.latin_lang_of(l) == lang]
+            a = compare.tokens_from_text("\n".join(lines), lang)
             b = compare.tokens_from_regions(des_regions, lang)
             ratio, ro, do = 0, "text", "ltr"
         else:
@@ -229,11 +233,11 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
             ratio, a, b, ro, do = best
         order[lang] = {"approved": ro, "design": do, "similarity": round(ratio, 3),
                        "approved_words": len(a), "design_words": len(b)}
-        progress(f"Level 2: comparing {'Arabic' if lang == 'ara' else 'English'} text")
+        progress(f"Level 2: comparing {label} text")
         content, spacing = compare.diff(a, b, lang, start_id=len(findings) + 1)
         findings += content
         if settings.get("step3", True):
-            progress(f"Level 3: punctuation and typography ({'Arabic' if lang == 'ara' else 'English'})")
+            progress(f"Level 3: punctuation and typography ({label})")
             findings += spacing
             findings += compare.typography(a, b, lang, start_id=len(findings) + 1)
         check()

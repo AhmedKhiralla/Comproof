@@ -238,7 +238,7 @@ class CompanyPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     country: str | None = Field(default=None, min_length=2, max_length=2)
     timezone: str | None = Field(default=None, max_length=64)
-    default_language: Literal["en", "ar"] | None = None
+    default_language: Literal["en", "ar", "fr"] | None = None
 
 
 @endpoint(auth="tenant_admin", body=CompanyPatch)
@@ -278,7 +278,7 @@ def update_terminology(call: Call):
         if key not in TERMS:
             raise ApiError(422, "invalid", f"Unknown term: {key}")
         entry = {}
-        for lang in ("en", "ar"):
+        for lang in ("en", "ar", "fr"):
             val = (langs.get(lang) or "").strip()
             if len(val) > 60:
                 raise ApiError(422, "invalid", "Some fields need attention.", fields={f"{key}.{lang}": "Use 60 characters or fewer."})

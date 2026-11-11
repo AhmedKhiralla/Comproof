@@ -15,7 +15,7 @@ import type { StringKey } from "../lib/strings";
 type Sev = "critical" | "major" | "minor" | "info";
 type Loc = [number, number[]];
 interface Finding {
-  id: string; step: number; lang: "eng" | "ara"; kind: string; severity: Sev; title: string; ref_text: string; des_text: string;
+  id: string; step: number; lang: "eng" | "fra" | "ara"; kind: string; severity: Sev; title: string; ref_text: string; des_text: string;
   ref_loc: Loc[]; des_loc: Loc[]; ref_hl: Loc[]; des_hl: Loc[]; ref_anchor: Loc[]; des_anchor: Loc[];
   ai: { verdict?: string; approved_reads?: string; design_reads?: string; explanation?: string; model?: string } | null;
   note: string; section: string; category: string; segments: [string, string][]; context_before: string; context_after: string;
@@ -157,7 +157,7 @@ function Card({ cid, f, open, active, d, canDecide, onToggle, onView, onDecided 
         <span className="ttl" dir="auto">{f.title}</span>
         <span className={`state ${state}`}>{t(`dec.${state}` as StringKey)}</span>
         <span className="meta"><span className="mono-id">{f.id}</span><span dir="auto">{f.section || "—"}</span><span>{f.category}</span>
-          <span>{f.lang === "ara" ? "العربية" : "English"}</span>
+          <span>{f.lang === "ara" ? "العربية" : f.lang === "fra" ? "Français" : "English"}</span>
           {f.read_conf !== undefined && f.read_conf < 75 && <span className="lowconf">{t("rep.lowConf", { n: f.read_conf })}</span>}</span>
         {!open && <span className={`peek ${isAr(peek) ? "ar" : ""}`} dir="auto">{peek}</span>}
       </button>
@@ -302,7 +302,7 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
     return F.some((f) => f.step === 2 && f.severity !== "info") ? 2 : first ?? steps[0] ?? 1;
   });
   const [sec, setSec] = useState("");
-  const [lang, setLang] = useState<"" | "eng" | "ara">("");
+  const [lang, setLang] = useState<"" | "eng" | "fra" | "ara">("");
   const [pending, setPending] = useState(false);
   const [noise, setNoise] = useState(false);
   const [q, setQ] = useState("");
@@ -473,6 +473,7 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
             <div className="rep-tools">
               <input id="rep-q" className="input grow" type="search" placeholder={t("rep.search")} aria-label={t("rep.search")} value={q} onChange={(e) => setQ(e.target.value)} />
               <button type="button" className="chip" aria-pressed={lang === "eng"} onClick={() => setLang(lang === "eng" ? "" : "eng")}>English</button>
+              <button type="button" className="chip" aria-pressed={lang === "fra"} onClick={() => setLang(lang === "fra" ? "" : "fra")}>Français</button>
               <button type="button" className="chip" aria-pressed={lang === "ara"} onClick={() => setLang(lang === "ara" ? "" : "ara")}>العربية</button>
               <button type="button" className="chip" aria-pressed={pending} onClick={() => setPending(!pending)}>{t("rep.undecided", { n: undecided })}</button>
               <button type="button" className="chip" aria-pressed={noise} onClick={() => setNoise(!noise)}>{t("rep.showNoise")}</button>

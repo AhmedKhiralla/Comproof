@@ -14,10 +14,14 @@ AR_INDIC = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "0123456789
 AR_DIACRITICS = re.compile(r"[ً-ٰٟـ]")      # harakat + tatweel
 PUNCT_EDGE = re.compile(r"^[^\w؀-ۿ]+|[^\w؀-ۿ%]+$")
 
+LANG_LABELS = {"eng": "English", "fra": "French", "ara": "Arabic"}
+
 CRITICAL_TERMS = [
     "mg", "dose", "daily", "week", "maximum", "contraindicat", "pregnan", "breast", "child",
     "paediatric", "overdose", "do not", "must not", "not recommended", "store", "°c", "temperature",
     "مجم", "جرعة", "الجرعة", "يومي", "أسبوع", "الحمل", "الأطفال", "لا ", "درجة",
+    "posologie", "par jour", "quotidien", "semaine", "maximale", "contre-indiqu", "grossesse", "allaite",
+    "enfant", "surdosage", "ne pas", "ne prenez", "ne doit pas", "déconseillé", "conserver", "température",
 ]
 
 
@@ -88,6 +92,8 @@ def norm_word(w: str, lang: str) -> list[str]:
     if lang == "ara":
         w = fix_ar_digits(w)
     w = unicodedata.normalize("NFKC", w).translate(AR_INDIC)
+    # typographic apostrophes and French ligatures: OCR and text layers disagree on these glyphs
+    w = w.replace("’", "'").replace("‘", "'").replace("œ", "oe").replace("Œ", "Oe").replace("æ", "ae").replace("Æ", "Ae")
     w = re.sub(r"(?<=\d)[,٫](?=\d)", ".", w)          # Arabic decimal comma -> point
     w = w.lower()
     if lang == "ara":
@@ -118,6 +124,44 @@ SMPC = {
     "6.2": "6.2 Incompatibilities", "6.3": "6.3 Shelf life", "6.4": "6.4 Storage precautions",
     "6.5": "6.5 Container", "6.6": "6.6 Disposal and handling", "7": "7. Licence holder and manufacturer",
 }
+SMPC_FR = {
+    "1": "1. Dénomination du médicament", "2": "2. Composition qualitative et quantitative",
+    "3": "3. Forme pharmaceutique", "4": "4. Données cliniques", "4.1": "4.1 Indications thérapeutiques",
+    "4.2": "4.2 Posologie et mode d'administration", "4.3": "4.3 Contre-indications",
+    "4.4": "4.4 Mises en garde et précautions d'emploi", "4.5": "4.5 Interactions",
+    "4.6": "4.6 Fertilité, grossesse et allaitement", "4.7": "4.7 Conduite et utilisation de machines",
+    "4.8": "4.8 Effets indésirables", "4.9": "4.9 Surdosage", "5": "5. Propriétés pharmacologiques",
+    "5.1": "5.1 Propriétés pharmacodynamiques", "5.2": "5.2 Propriétés pharmacocinétiques",
+    "5.3": "5.3 Données de sécurité préclinique", "6": "6. Données pharmaceutiques",
+    "6.1": "6.1 Liste des excipients", "6.2": "6.2 Incompatibilités", "6.3": "6.3 Durée de conservation",
+    "6.4": "6.4 Précautions de conservation", "6.5": "6.5 Nature et contenu de l'emballage",
+    "6.6": "6.6 Précautions d'élimination et manipulation", "7": "7. Titulaire de l'autorisation",
+}
+PIL_EN = [
+    ("used for", "PIL 1 · What the medicine is and what it is used for"),
+    ("before you take", "PIL 2 · What you need to know before you take"),
+    ("need to know", "PIL 2 · What you need to know before you take"),
+    ("do not take", "PIL 2 · Do not take"), ("warnings", "PIL 2 · Warnings and precautions"),
+    ("other medicines", "PIL 2 · Other medicines"), ("pregnan", "PIL 2 · Pregnancy and breast-feeding"),
+    ("driving", "PIL 2 · Driving and using machines"), ("how to take", "PIL 3 · How to take"),
+    ("instructions for", "PIL 3 · Instructions for use"), ("if you take more", "PIL 3 · Overdose"),
+    ("if you forget", "PIL 3 · If you forget a dose"), ("if you stop", "PIL 3 · If you stop taking"),
+    ("side effects", "PIL 4 · Possible side effects"), ("how to store", "PIL 5 · Storage"),
+    ("contents of the pack", "PIL 6 · Contents of the pack"), ("marketing authorisation", "PIL 6 · Licence holder and manufacturer"),
+]
+PIL_FR = [
+    ("qu'est-ce que", "PIL 1 · Qu'est-ce que le médicament et dans quels cas est-il utilisé"),
+    ("informations à connaître", "PIL 2 · Informations à connaître avant de prendre"),
+    ("ne prenez jamais", "PIL 2 · Ne prenez jamais"), ("avertissements", "PIL 2 · Avertissements et précautions"),
+    ("autres médicaments", "PIL 2 · Autres médicaments"), ("grossesse", "PIL 2 · Grossesse et allaitement"),
+    ("conduite de véhicules", "PIL 2 · Conduite et utilisation de machines"),
+    ("comment prendre", "PIL 3 · Comment prendre"), ("mode d'emploi", "PIL 3 · Mode d'emploi"),
+    ("si vous avez pris plus", "PIL 3 · Surdosage"), ("si vous oubliez", "PIL 3 · Oubli d'une dose"),
+    ("si vous arrêtez", "PIL 3 · Arrêt du traitement"),
+    ("effets indésirables", "PIL 4 · Effets indésirables éventuels"),
+    ("comment conserver", "PIL 5 · Conservation"), ("contenu de l'emballage", "PIL 6 · Contenu de l'emballage"),
+    ("titulaire", "PIL 6 · Titulaire et fabricant"),
+]
 PIL_AR = [
     ("ما هو", "PIL 1 · ما هو الدواء وما هو يستخدم له"), ("ما تحتاج", "PIL 2 · ما تحتاج معرفته قبل التناول"),
     ("لا يؤخذ", "PIL 2 · لا يؤخذ"), ("تحذيرات", "PIL 2 · التحذيرات والاحتياطات"),
@@ -128,17 +172,21 @@ PIL_AR = [
     ("الآثار الجانبية", "PIL 4 · الآثار الجانبية"), ("كيفية تخزين", "PIL 5 · التخزين"),
     ("محتويات العبوة", "PIL 6 · محتويات العبوة"), ("صاحب الترخيص", "PIL 6 · صاحب الترخيص والمصنع"),
 ]
-HEAD_EN = re.compile(r"^\s*(\d(?:\.\d)?)\s*\.?\s*([A-Z][A-Za-z&,\- ]{3,})")
+HEAD_EN = re.compile(r"^\s*(\d(?:\.\d)?)\s*\.?\s*([A-ZÀ-Þ][A-Za-zà-ÿÀ-ÞœŒ&,'’\- ]{3,})")
 
 
 def heading_of(text: str, lang: str) -> str | None:
     t = BIDI.sub("", text).strip()
     if len(t) > 75:
         return None
-    if lang == "eng":
+    if lang in ("eng", "fra"):
+        low = t.lower().replace("’", "'")
+        for key, name in (PIL_FR if lang == "fra" else PIL_EN):
+            if key in low[:55] and len(t.split()) <= 14:
+                return name
         m = HEAD_EN.match(t)
         if m and m.group(1) in SMPC:
-            return SMPC[m.group(1)]
+            return (SMPC_FR if lang == "fra" else SMPC)[m.group(1)]
         return None
     for key, name in PIL_AR:
         if key in t[:40] and len(t.split()) <= 9:
@@ -309,15 +357,23 @@ def _word_loc(tokens: list[Token]) -> list:
 
 CATEGORIES = [
     ("Strength & composition", ["composition", "excipient", "name of the medicinal", "pharmaceutical form",
-                                "محتويات", "ما هو"], ["contains", "fumarate", "mg of", "يحتوي", "المادة الفعالة"]),
-    ("Dose & administration", ["posology", "كيفية", "تعليمات", "نسيت", "توقفت"],
-     ["dose", "daily", "week", "titration", "tongue", "swallow", "water", "جرعة", "يوميا", "أسبوع", "اللسان"]),
+                                "dénomination", "forme pharmaceutique", "qu'est-ce que",
+                                "محتويات", "ما هو"], ["contains", "fumarate", "mg of", "contient", "يحتوي", "المادة الفعالة"]),
+    ("Dose & administration", ["posology", "posologie", "comment prendre", "mode d'emploi", "mode d'administration",
+                               "oubli", "arrêt", "كيفية", "تعليمات", "نسيت", "توقفت"],
+     ["dose", "daily", "week", "titration", "tongue", "swallow", "water", "par jour", "semaine", "avaler",
+      "جرعة", "يوميا", "أسبوع", "اللسان"]),
     ("Safety information", ["contraindication", "warning", "interaction", "pregnan", "driving", "undesirable",
-                            "overdose", "لا يؤخذ", "تحذير", "الأدوية الأخرى", "الحمل", "القيادة", "الآثار",
-                            "الجرعة الزائدة"], ["contraindicat", "must not", "risk", "caution", "لا تتناول"]),
-    ("Pharmacology", ["pharmacodynamic", "pharmacokinetic", "preclinical"], ["half-life", "clearance"]),
-    ("Storage, pack & manufacturer", ["storage", "shelf", "container", "disposal", "licence", "التخزين",
-                                      "صاحب الترخيص"], ["°c", "store", "درجة", "يحفظ", "يخزن"]),
+                            "overdose", "contre-indication", "mises en garde", "avertissement", "grossesse",
+                            "conduite", "effets indésirables", "surdosage", "ne prenez jamais",
+                            "لا يؤخذ", "تحذير", "الأدوية الأخرى", "الحمل", "القيادة", "الآثار",
+                            "الجرعة الزائدة"], ["contraindicat", "must not", "risk", "caution", "contre-indiqu",
+                                                "ne doit pas", "risque", "لا تتناول"]),
+    ("Pharmacology", ["pharmacodynamic", "pharmacokinetic", "preclinical", "pharmacodynamique",
+                      "pharmacocinétique", "préclinique"], ["half-life", "clearance", "demi-vie"]),
+    ("Storage, pack & manufacturer", ["storage", "shelf", "container", "disposal", "licence", "conservation",
+                                      "emballage", "titulaire", "التخزين",
+                                      "صاحب الترخيص"], ["°c", "store", "conserver", "درجة", "يحفظ", "يخزن"]),
 ]
 
 
@@ -580,7 +636,7 @@ def typography(ref_tokens: list[Token], des_tokens: list[Token], lang: str, star
                 rp, dp = re.sub(r"[\w]", "", r.raw), re.sub(r"[\w]", "", d.raw)
                 if exact or set(rp) - set(".,") or set(dp) - set(".,"):
                     kind, title = "punctuation", "Punctuation differs"
-            elif lang == "eng" and r.raw.lower() == d.raw.lower():
+            elif lang != "ara" and r.raw.lower() == d.raw.lower():
                 kind, title = "case", "Capitalisation differs"
             if not kind:
                 continue

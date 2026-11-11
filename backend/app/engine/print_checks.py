@@ -78,6 +78,10 @@ BRAILLE = {  # dots -> letter (Grade 1 / UEB letters)
     (1, 3, 6): "u", (1, 2, 3, 6): "v", (2, 4, 5, 6): "w", (1, 3, 4, 6): "x", (1, 3, 4, 5, 6): "y", (1, 3, 5, 6): "z",
     (3, 4, 5, 6): "#", (2,): ",", (2, 5, 6): ".", (3, 6): "-", (6,): "^", (2, 5): ":", (2, 3): ";", (2, 3, 5): "!",
     (4, 6): ".",   # decimal point in some codes (Marburg/EU) - shown as "."
+    # French accented letters (Braille français); folded to their plain letter when comparing with the product name
+    (1, 2, 3, 5, 6): "à", (1, 6): "â", (1, 2, 3, 4, 6): "ç", (1, 2, 3, 4, 5, 6): "é", (2, 3, 4, 6): "è",
+    (1, 2, 6): "ê", (1, 2, 4, 6): "ë", (1, 4, 6): "î", (1, 2, 4, 5, 6): "ï", (1, 4, 5, 6): "ô", (2, 4, 6): "œ",
+    (2, 3, 4, 5, 6): "ù", (1, 5, 6): "û", (1, 2, 5, 6): "ü",
 }
 DIGITS = dict(zip("abcdefghij", "1234567890"))
 
@@ -201,7 +205,9 @@ def braille_check(doc, expected_name: str, strengths: list[str], required: bool)
             found.append(dict(b, page=p.index))
     info = {"found": found, "expected": expected_name}
     problems = []
-    norm = lambda s: re.sub(r"[^a-z0-9.]", "", s.lower())
+    import unicodedata
+    fold = lambda s: unicodedata.normalize("NFKD", s.replace("œ", "oe")).encode("ascii", "ignore").decode()
+    norm = lambda s: re.sub(r"[^a-z0-9.]", "", fold(s.lower()))
     joined = norm(" ".join(b["text"] for b in found))
     if not found:
         if required:

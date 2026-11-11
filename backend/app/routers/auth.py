@@ -188,7 +188,7 @@ def change_password(call: Call):
 
 
 class PreferencesBody(BaseModel):
-    language: Literal["en", "ar"] | None = None
+    language: Literal["en", "ar", "fr"] | None = None
     theme: Literal["light", "dark", "system"] | None = None
     checklist_hidden: bool | None = None
     tour_seen: str | None = Field(default=None, max_length=40, pattern=r"^[a-z0-9_-]+$")

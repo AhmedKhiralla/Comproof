@@ -32,7 +32,7 @@ class TenantCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     country: str = Field(default="EG", min_length=2, max_length=2)
     timezone: str = Field(default="Africa/Cairo", max_length=64)
-    default_language: Literal["en", "ar"] = "en"
+    default_language: Literal["en", "ar", "fr"] = "en"
     admin: AdminIn
 
     @field_validator("code")
@@ -53,7 +53,7 @@ class TenantUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=160)
     country: str | None = Field(default=None, min_length=2, max_length=2)
     timezone: str | None = Field(default=None, max_length=64)
-    default_language: Literal["en", "ar"] | None = None
+    default_language: Literal["en", "ar", "fr"] | None = None
     status: Literal["active", "suspended"] | None = None
 
 

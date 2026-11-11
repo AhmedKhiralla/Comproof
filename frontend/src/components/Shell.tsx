@@ -85,7 +85,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-        <div className="sidebar-foot">{t("shell.version", { v: "1.2.1" })} · Comp11 Labs</div>
+        <div className="sidebar-foot">{t("shell.version", { v: "1.3.0" })} · Comp11 Labs</div>
       </aside>
       {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 
@@ -116,9 +116,9 @@ export function Shell({ children }: { children: ReactNode }) {
                 <div className="menu-label">{u.email}</div>
                 <div className="menu-sep" />
                 <div className="menu-label">{t("common.language")}</div>
-                <MenuItem icon={<LuLanguages />} onClick={() => { savePreference({ language: lang === "ar" ? "en" : "ar" }); close(); }}>
-                  {lang === "ar" ? "English" : "العربية"}
-                </MenuItem>
+                {([["en", "English"], ["fr", "Français"], ["ar", "العربية"]] as const).filter(([l]) => l !== lang).map(([l, label]) => (
+                  <MenuItem key={l} icon={<LuLanguages />} onClick={() => { savePreference({ language: l }); close(); }}>{label}</MenuItem>
+                ))}
                 <div className="menu-label">{t("theme.label")}</div>
                 <div style={{ padding: "2px 6px 6px" }}>
                   <div className="seg" role="group" aria-label={t("theme.label")}>

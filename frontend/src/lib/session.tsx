@@ -14,7 +14,7 @@ export interface Me {
   policy: Policy;
   tenant: null | {
     id: string; code: string; name: string; country: string; timezone: string; default_language: Lang;
-    features: Record<string, boolean>; terminology: Record<string, { en: string; ar: string }>;
+    features: Record<string, boolean>; terminology: Record<string, { en: string; ar: string; fr?: string }>;
     ai: { configured: boolean; review: boolean; read: boolean; science: boolean };
   };
   sites: Site[];

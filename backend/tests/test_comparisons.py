@@ -316,3 +316,67 @@ def test_review_of_draft_approved_material_without_test_file(acme):
     assert st == 200 and pdfb[:4] == b"%PDF"
     st, lst, _ = reviewer.get("/api/comparisons")
     assert any(x["id"] == cm["id"] and x["test_filename"] is None for x in lst["items"])
+
+
+APPROVED_FR = [
+    "1. DÉNOMINATION DU MÉDICAMENT",
+    "Nerkardou 2,5 mg film orodispersible",
+    "2. COMPOSITION QUALITATIVE ET QUANTITATIVE",
+    "Chaque film de Nerkardou 2,5 mg contient 2,5 mg de fumarate de bisoprolol.",
+    "Pour la liste complète des excipients, voir rubrique 6.1.",
+    "4.2 Posologie et mode d'administration",
+    "La dose maximale recommandée est de 10 mg une fois par jour.",
+    "A conserver à une température ne dépassant pas 30 C.",
+]
+DESIGN_FR = [
+    "1. DÉNOMINATION DU MÉDICAMENT",
+    "Nerkardou 2,5 mg film orodispersible",
+    "2. COMPOSITION QUALITATIVE ET QUANTITATIVE",
+    "Chaque film de Nerkardou 2,5 mg contient 5 mg de fumarate de bisoprolol.",
+    "Pour la liste complète des excipients, voir rubrique 6.1.",
+    "4.2 Posologie et mode d'administration",
+    "La dose maximale recommandée est de 20 mg une fois par jour.",
+    "A conserver à une température ne dépassant pas 30 C.",
+]
+
+
+def test_french_comparison(acme):
+    """A French leaflet is compared in French: fra is accepted end to end, decimal commas are understood,
+    French section headings are recognised, and the changed numbers are found."""
+    editor, _ = acme["editor"]
+    st, p, _ = editor.post("/api/products", {"code": "NRKF", "name": "Nerkardou FR", "strengths": "2.5, 5, 10 mg"})
+    assert st == 200, p
+    st, comp, _ = editor.post(f"/api/products/{p['id']}/components",
+                              {"code": "NRKF-PIL", "kind": "leaflet", "name": "Notice patient", "languages": ["fr"]})
+    assert st == 200, comp
+    st, f, = editor.upload("/api/files", "approuve.pdf", _pdf(APPROVED_FR))
+    assert st == 200, f
+    st, c, _ = editor.post(f"/api/components/{comp['id']}/artwork", {"version": "01", "file_id": f["id"]})
+    assert st == 200, c
+    approver, apw = acme["approver"]
+    st, c, _ = approver.post(f"/api/artwork/{c['versions'][0]['id']}/sign",
+                             {"meaning": "approved_master", "email": "approver@cmpr.test", "password": apw})
+    assert st == 200, c
+    reviewer, _ = acme["reviewer"]
+    st, f, = reviewer.upload("/api/files", "epreuve.pdf", _pdf(DESIGN_FR))
+    assert st == 200
+    st, c, _ = reviewer.post("/api/comparisons", {"site_id": acme["site"]["id"], "title": "Notice FR épreuve 1",
+                                                  "component_id": comp["id"], "test_file_id": f["id"],
+                                                  "languages": ["fra"], "supplier": "Imprimerie Alger"})
+    assert st == 200, c
+    s = _wait(reviewer, c["id"])
+    assert s["status"] == "review", s
+    st, d, _ = reviewer.get(f"/api/comparisons/{c['id']}")
+    res = d["result"]
+    assert res["reading_order"].get("fra"), res["reading_order"]
+    fra = [x for x in res["findings"] if x["lang"] == "fra"]
+    assert fra, [x["lang"] for x in res["findings"]]
+    # 2,5 -> 5 in the composition: a changed number, critical
+    numeric = [x for x in fra if x["kind"] == "numeric" and "5" in x["des_text"] and "2.5" in x["ref_text"].replace(",", ".")]
+    assert numeric and numeric[0]["severity"] == "critical", [(x["kind"], x["ref_text"], x["des_text"]) for x in fra]
+    # 10 mg -> 20 mg maximum dose
+    dose = [x for x in fra if "10" in x["ref_text"] and "20" in x["des_text"]]
+    assert dose, [(x["kind"], x["ref_text"], x["des_text"]) for x in fra]
+    # French section headings are recognised and used as the finding's section
+    secs = {x.get("section", "") for x in fra}
+    assert any("Posologie" in s_ or "DÉNOMINATION" in s_ or "COMPOSITION" in s_ for s_ in secs), secs

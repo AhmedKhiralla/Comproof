@@ -172,11 +172,41 @@ def _ocr_conf(crop: Image.Image, lang: str) -> float:
     return float(np.mean(confs)) if confs else 0.0
 
 
-def detect_lang(crop: Image.Image) -> str:
+def detect_lang(crop: Image.Image, latin: str = "eng") -> str:
+    """Arabic or Latin script? `latin` is the comparison's Latin OCR language: "eng", "fra" or "eng+fra"."""
     h = crop.height
     top = int(h * 0.3)
     band = crop.crop((0, top, crop.width, min(h, top + max(300, h // 4))))
-    return "ara" if _ocr_conf(band, "ara") > _ocr_conf(band, "eng") + 5 else "eng"
+    return "ara" if _ocr_conf(band, "ara") > _ocr_conf(band, latin) + 5 else latin
+
+
+# English or French? Scored on stopwords plus accented letters; used only when a comparison carries both.
+FR_STOP = {"le", "la", "les", "des", "du", "de", "un", "une", "et", "ou", "vous", "votre", "vos", "ne", "pas",
+           "est", "sont", "ce", "cette", "ces", "avec", "pour", "dans", "sur", "si", "que", "qui", "plus",
+           "avant", "chez", "prenez", "prendre", "médicament", "notice", "effets", "indésirables", "jour",
+           "jours", "comprimé", "comprimés", "grossesse", "conserver", "contre", "autres", "pendant", "chaque",
+           "votre", "être", "aux", "au", "dose", "enfants", "mois", "sans", "peut", "doit", "lisez"}
+EN_STOP = {"the", "of", "and", "or", "you", "your", "not", "is", "are", "this", "these", "with", "for", "in",
+           "on", "if", "that", "which", "more", "before", "take", "taking", "medicine", "leaflet", "effects",
+           "side", "day", "days", "tablet", "tablets", "pregnancy", "store", "other", "during", "each", "any",
+           "do", "to", "it", "as", "by", "have", "has", "been", "children", "month", "without", "can", "must"}
+FR_HINT = set("éèêëàâçîïôùûüœ")
+
+
+def latin_lang_of(text: str) -> str:
+    low = text.lower()
+    words = re.findall(r"[a-zà-ÿœ']+", low)
+    fr = 2 * sum(1 for w in words if w in FR_STOP) + sum(1 for ch in low if ch in FR_HINT)
+    en = 2 * sum(1 for w in words if w in EN_STOP)
+    return "fra" if fr > en else "eng"
+
+
+def resolve_latin(reg: "Region", latin: str) -> "Region":
+    """Fix a region's language after reading: Arabic stays; Latin becomes the one Latin language of the
+    comparison, or, when both English and French are present, whichever its own wording scores as."""
+    if reg.lang != "ara":
+        reg.lang = latin_lang_of(" ".join(ln.text for ln in reg.lines)) if "+" in latin else latin
+    return reg
 
 
 # ---------------------------------------------------------------- OCR
@@ -324,13 +354,13 @@ def _rotation(crop: Image.Image) -> int:
     return 0
 
 
-def ocr_rotated(gray: Image.Image, box: list, page: int, rotate: int) -> Region:
+def ocr_rotated(gray: Image.Image, box: list, page: int, rotate: int, latin: str = "eng") -> Region:
     """Read a rotated block (side panel of a carton, vertical label text) and map positions back."""
     x0, y0, x1, y1 = box
     crop = gray.crop((x0, y0, x1, y1))
     W, H = crop.size
     up = crop.rotate(-rotate, expand=True)          # PIL rotates counter-clockwise
-    lang = detect_lang(up)
+    lang = detect_lang(up, latin)
     reg = ocr_region(up, [0, 0, up.width, up.height], lang, page)
 
     def back(px, py):
@@ -355,7 +385,7 @@ def ocr_rotated(gray: Image.Image, box: list, page: int, rotate: int) -> Region:
 
 
 def analyse_page(img: Image.Image, page: int, exclude_phrases: list[str] | None = None, *,
-                 text_words: list | None = None, rotated: str = "ignore", reader=None):
+                 text_words: list | None = None, rotated: str = "ignore", reader=None, latin: str = "eng"):
     """Find the text regions of one page and read them.
 
     text_words  exact words from a PDF text layer (positions in page pixels); OCR is used only where
@@ -381,7 +411,7 @@ def analyse_page(img: Image.Image, page: int, exclude_phrases: list[str] | None 
                 if rotated == "ignore":
                     exclusions.append(Exclusion(page, box, "Rotated block (print-house / artwork info)"))
                     continue
-                reg = ocr_rotated(gray, box, page, rot)
+                reg = resolve_latin(ocr_rotated(gray, box, page, rot, latin), latin)
                 if reader is not None:
                     reg = reader(gray, reg, rot)
                 reg.lines = [ln for ln in reg.lines if not is_admin_line(ln.text, phrases)]
@@ -396,11 +426,13 @@ def analyse_page(img: Image.Image, page: int, exclude_phrases: list[str] | None 
                       and box[1] <= (w["box"][1] + w["box"][3]) / 2 <= box[3]]
             ar = sum(1 for w in inside for ch in w["text"] if "\u0600" <= ch <= "\u06ff" or "\ufb50" <= ch <= "\ufeff")
             total = sum(len(w["text"]) for w in inside) or 1
-            lang = "ara" if ar / total > 0.4 else "eng"
+            lang = "ara" if ar / total > 0.4 else latin
             reg = region_from_words(inside, box, page, lang)
+            if reg is not None:
+                reg = resolve_latin(reg, latin)
         if reg is None:
-            lang = detect_lang(crop)
-            reg = ocr_region(gray, box, lang, page)
+            lang = detect_lang(crop, latin)
+            reg = resolve_latin(ocr_region(gray, box, lang, page), latin)
             if reader is not None:
                 reg = reader(gray, reg, 0)
         pn_y = _page_number_y(reg.lines, img.height)

@@ -53,7 +53,7 @@ function CreateSheet({ onClose, onCreated }: { onClose: () => void; onCreated: (
       <div className="grid-2">
         <SelectField label={t("common.country")} value={f.country} onChange={set("country")} options={countries} />
         <SelectField label={t("settings.defaultLanguage")} value={f.default_language} onChange={set("default_language")}
-          options={[{ value: "en", label: "English" }, { value: "ar", label: "العربية" }]} />
+          options={[{ value: "en", label: "English" }, { value: "fr", label: "Français" }, { value: "ar", label: "العربية" }]} />
       </div>
       <SelectField label={t("common.timezone")} value={f.timezone} onChange={set("timezone")} options={zones} />
       <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
@@ -112,7 +112,7 @@ function ManageSheet({ tenant, onClose, onSaved, onSecret }: { tenant: Tenant; o
       <div className="grid-2">
         <SelectField label={t("common.country")} value={f.country} onChange={set("country")} options={countries} />
         <SelectField label={t("settings.defaultLanguage")} value={f.default_language} onChange={set("default_language")}
-          options={[{ value: "en", label: "English" }, { value: "ar", label: "العربية" }]} />
+          options={[{ value: "en", label: "English" }, { value: "fr", label: "Français" }, { value: "ar", label: "العربية" }]} />
       </div>
       <SelectField label={t("common.timezone")} value={f.timezone} onChange={set("timezone")} options={zones} />
 

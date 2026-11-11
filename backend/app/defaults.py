@@ -58,10 +58,10 @@ def effective_engine(stored: dict | None) -> dict:
 
 # Renamable terms. Each company can change the words used across the app.
 TERMS: dict[str, dict[str, str]] = {
-    "component":  {"en": "Packaging component", "ar": "مادة تعبئة"},
-    "artwork":    {"en": "Approved artwork", "ar": "التصميم المعتمد"},
-    "comparison": {"en": "Comparison", "ar": "مقارنة"},
-    "supplier":   {"en": "Print house", "ar": "المطبعة"},
+    "component":  {"en": "Packaging component", "ar": "مادة تعبئة", "fr": "Article de conditionnement"},
+    "artwork":    {"en": "Approved artwork", "ar": "التصميم المعتمد", "fr": "Maquette approuvée"},
+    "comparison": {"en": "Comparison", "ar": "مقارنة", "fr": "Comparaison"},
+    "supplier":   {"en": "Print house", "ar": "المطبعة", "fr": "Imprimeur"},
 }
 
 
@@ -69,7 +69,7 @@ def effective_terms(stored: dict | None) -> dict[str, dict[str, str]]:
     out = {k: dict(v) for k, v in TERMS.items()}
     for key, langs in (stored or {}).items():
         if key in out and isinstance(langs, dict):
-            for lang in ("en", "ar"):
+            for lang in ("en", "ar", "fr"):
                 val = langs.get(lang)
                 if isinstance(val, str) and val.strip():
                     out[key][lang] = val.strip()[:60]

@@ -16,8 +16,8 @@ interface SettingsData {
   engine: { provider: string | null; reading_provider: string | null; exclude_phrases: string[]; rotated_text: "auto" | "ignore" | "read";
     colour_tolerance: number; flat_tolerance: number; min_font_pt: Record<string, number>; braille_required: string[]; cut_margin_mm: number };
   ai_providers: { name: string; label: string; vision_model: string; text_model: string }[];
-  terminology: Record<string, { en: string; ar: string }>;
-  terminology_defaults: Record<string, { en: string; ar: string }>;
+  terminology: Record<string, { en: string; ar: string; fr?: string }>;
+  terminology_defaults: Record<string, { en: string; ar: string; fr?: string }>;
   security: Policy;
   security_limits: Record<string, [number, number]>;
 }
@@ -61,8 +61,8 @@ function CompanyTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Settin
           <SelectField label={t("common.timezone")} value={f.timezone} onChange={(v) => setF({ ...f, timezone: v })} options={zones} />
         </div>
         <div className="grid-2">
-          <SelectField label={t("settings.defaultLanguage")} value={f.default_language} onChange={(v) => setF({ ...f, default_language: v as "en" | "ar" })}
-            options={[{ value: "en", label: "English" }, { value: "ar", label: "العربية" }]} />
+          <SelectField label={t("settings.defaultLanguage")} value={f.default_language} onChange={(v) => setF({ ...f, default_language: v as "en" | "ar" | "fr" })}
+            options={[{ value: "en", label: "English" }, { value: "fr", label: "Français" }, { value: "ar", label: "العربية" }]} />
         </div>
         <div><Button type="submit" variant="primary" busy={s.busy}>{t("common.save")}</Button></div>
       </div>
@@ -106,6 +106,7 @@ function TermsTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Settings
   const keys = Object.keys(data.terminology_defaults);
   const initial = () => Object.fromEntries(keys.map((k) => [k, {
     en: data.terminology[k].en === data.terminology_defaults[k].en ? "" : data.terminology[k].en,
+    fr: (data.terminology[k].fr ?? "") === (data.terminology_defaults[k].fr ?? "") ? "" : (data.terminology[k].fr ?? ""),
     ar: data.terminology[k].ar === data.terminology_defaults[k].ar ? "" : data.terminology[k].ar,
   }]));
   const [f, setF] = useState<Record<string, { en: string; ar: string }>>(initial);
@@ -117,13 +118,15 @@ function TermsTab({ data, onSaved }: { data: SettingsData; onSaved: (d: Settings
       {s.general && <Notice tone="danger">{s.general}</Notice>}
       <div className="panel table-wrap">
         <table className="table">
-          <thead><tr><th>{t("settings.terms.term")}</th><th>English</th><th>العربية</th></tr></thead>
+          <thead><tr><th>{t("settings.terms.term")}</th><th>English</th><th>Français</th><th>العربية</th></tr></thead>
           <tbody>
             {keys.map((k) => (
               <tr key={k}>
                 <td className="cell-main">{tx(`term.${k}`, k)}</td>
                 <td><input className="input" dir="ltr" lang="en" placeholder={data.terminology_defaults[k].en} value={f[k].en} maxLength={60}
                   aria-label={`${tx(`term.${k}`, k)} — English`} onChange={(e) => setF({ ...f, [k]: { ...f[k], en: e.target.value } })} /></td>
+                <td><input className="input" dir="ltr" lang="fr" placeholder={data.terminology_defaults[k].fr ?? ""} value={f[k].fr} maxLength={60}
+                  aria-label={`${tx(`term.${k}`, k)} — Français`} onChange={(e) => setF({ ...f, [k]: { ...f[k], fr: e.target.value } })} /></td>
                 <td><input className="input" dir="rtl" lang="ar" placeholder={data.terminology_defaults[k].ar} value={f[k].ar} maxLength={60}
                   aria-label={`${tx(`term.${k}`, k)} — العربية`} onChange={(e) => setF({ ...f, [k]: { ...f[k], ar: e.target.value } })} /></td>
               </tr>
