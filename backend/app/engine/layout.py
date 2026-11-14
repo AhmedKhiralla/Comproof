@@ -137,18 +137,37 @@ def _find_columns(gray: Image.Image) -> list[list[int]]:
     k = max(3, w // 600)
     prof = np.convolve(prof, np.ones(k) / k, mode="same")
     min_gap = max(8, int(w * 0.004))
-    cols = []
+    cols, tails = [], []
     nz = prof[prof > 1]
     thr = max(8.0, 0.06 * float(np.median(nz))) if len(nz) else 8.0
     for x0, x1 in _runs(prof, thr=thr, min_gap=min_gap):
-        if x1 - x0 < w * 0.06:          # vertical rules, cut marks
-            continue
         sub = ink[:, x0:x1]
         rows = np.where(sub.sum(1) > 2)[0]
         if len(rows) == 0:
             continue
-        cols.append([x0, int(rows[0]), x1, int(rows[-1]) + 1])
-    return cols
+        box = [x0, int(rows[0]), x1, int(rows[-1]) + 1]
+        short = box[3] - box[1] < h * 0.06               # a line or two of text, not a column or a long rule
+        if x1 - x0 < w * 0.06:
+            if short:
+                tails.append(box)                       # maybe the end of a line wider than its column
+            continue                                    # tall and thin: vertical rules, cut marks
+        (tails if short else cols).append(box)
+    # A short block separated from a column by about a word space is the end of a line that runs past the rest of
+    # that column (a long heading): it belongs to the column. Without this its words would be lost or read apart.
+    near = max(min_gap * 3, int(w * 0.012))
+    changed = True
+    while changed and tails:
+        changed = False
+        for t in list(tails):
+            for c in cols:
+                gap = t[0] - c[2] if t[0] >= c[2] else c[0] - t[2]
+                if 0 <= gap <= near and t[1] < c[3] and t[3] > c[1]:
+                    c[0], c[1], c[2], c[3] = min(c[0], t[0]), min(c[1], t[1]), max(c[2], t[2]), max(c[3], t[3])
+                    tails.remove(t)
+                    changed = True
+                    break
+    cols += [t for t in tails if t[2] - t[0] >= w * 0.06]   # a short block on its own (a label) is still text
+    return sorted(cols, key=lambda c: c[0])
 
 
 def _is_rotated(crop: Image.Image) -> bool:

@@ -97,7 +97,7 @@ export const cpEn = {
   "level.1.short": "Errors in the approved text itself",
   "level.2": "Level 2 · Content comparison",
   "level.2.d": "Every word of both documents, per language. Missing, added, changed and numbers.",
-  "level.2.short": "Every word, English and Arabic",
+  "level.2.short": "Every word, in each language",
   "level.3": "Level 3 · Punctuation and typography",
   "level.3.d": "Punctuation, spacing, capitalisation and digit style on matching text.",
   "level.3.short": "Punctuation, spacing, digits",
@@ -639,6 +639,15 @@ export const cpEn = {
   "fnd.where.left": "scan page {n}, left half",
   "fnd.where.right": "scan page {n}, right half",
   "fnd.where.page": "page {n}",
+  "ref.type": "This file is the approved…",
+  "ref.type.layout": "Approved layout",
+  "ref.type.text": "Approved text",
+  "ref.type.layout.hint": "The laid-out artwork as approved: page layout and reading order are part of the comparison.",
+  "ref.type.text.hint": "The approved continuous text (usually the Word file): line wraps, hyphenation at line ends and the order in which sections are placed on columns, panels and pages are not deviations. Word files default to this.",
+  "ref.textNote": "Compared against the approved continuous text: {j} word(s) hyphenated at a line end were read as whole words, and {m} block(s) placed elsewhere by the layout were not counted as deviations.",
+  "ref.textNoteSections": "The design was read in the approved text's section order.",
+  "barcode.status.valid": "Valid",
+  "barcode.status.invalid": "Invalid",
 };
 
 export const cpAr: Record<keyof typeof cpEn, string> = {
@@ -738,7 +747,7 @@ export const cpAr: Record<keyof typeof cpEn, string> = {
   "level.1.short": "أخطاء في النص المعتمد نفسه",
   "level.2": "المستوى ٢ · مقارنة المحتوى",
   "level.2.d": "كل كلمة في المستندين لكل لغة: المحذوف والمضاف والمتغير والأرقام.",
-  "level.2.short": "كل كلمة بالعربية والإنجليزية",
+  "level.2.short": "كل كلمة، بكل لغة",
   "level.3": "المستوى ٣ · الترقيم والطباعة",
   "level.3.d": "علامات الترقيم والمسافات وحالة الأحرف ونمط الأرقام في النص المتطابق.",
   "level.3.short": "الترقيم والمسافات والأرقام",
@@ -1280,6 +1289,15 @@ export const cpAr: Record<keyof typeof cpEn, string> = {
   "fnd.where.left": "صفحة المسح {n}، النصف الأيسر",
   "fnd.where.right": "صفحة المسح {n}، النصف الأيمن",
   "fnd.where.page": "صفحة {n}",
+  "ref.type": "هذا الملف هو…",
+  "ref.type.layout": "التخطيط المعتمد",
+  "ref.type.text": "النص المعتمد",
+  "ref.type.layout.hint": "التصميم كما اعتُمد: تخطيط الصفحة وترتيب القراءة جزء من المقارنة.",
+  "ref.type.text.hint": "النص المتصل المعتمد (عادةً ملف Word): فواصل الأسطر وتقسيم الكلمات في نهاية السطر وترتيب وضع الأقسام في الأعمدة والألواح والصفحات ليست انحرافات. هذا هو الافتراضي لملفات Word.",
+  "ref.textNote": "قورن بالنص المتصل المعتمد: {j} كلمة مقسّمة في نهاية السطر قُرئت ككلمات كاملة، و{m} كتلة نقلها التخطيط إلى مكان آخر لم تُحتسب انحرافات.",
+  "ref.textNoteSections": "قُرئ التصميم بترتيب أقسام النص المعتمد.",
+  "barcode.status.valid": "صالح",
+  "barcode.status.invalid": "غير صالح",
 };
 
 export const cpFr: Record<keyof typeof cpEn, string> = {
@@ -1921,4 +1939,13 @@ export const cpFr: Record<keyof typeof cpEn, string> = {
   "fnd.where.left": "page numérisée {n}, moitié gauche",
   "fnd.where.right": "page numérisée {n}, moitié droite",
   "fnd.where.page": "page {n}",
+  "ref.type": "Ce fichier est…",
+  "ref.type.layout": "Mise en page approuvée",
+  "ref.type.text": "Texte approuvé",
+  "ref.type.layout.hint": "La maquette telle qu'approuvée : la mise en page et l'ordre de lecture font partie de la comparaison.",
+  "ref.type.text.hint": "Le texte continu approuvé (en général le fichier Word) : les retours à la ligne, les césures en fin de ligne et l'ordre dans lequel les rubriques sont placées dans les colonnes, panneaux et pages ne sont pas des écarts. Valeur par défaut pour les fichiers Word.",
+  "ref.textNote": "Comparé au texte continu approuvé : {j} mot(s) coupé(s) en fin de ligne ont été lus comme mots entiers, et {m} bloc(s) placé(s) ailleurs par la mise en page n'ont pas été comptés comme écarts.",
+  "ref.textNoteSections": "La maquette a été lue dans l'ordre des rubriques du texte approuvé.",
+  "barcode.status.valid": "Valide",
+  "barcode.status.invalid": "Invalide",
 };

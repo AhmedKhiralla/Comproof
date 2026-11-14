@@ -113,6 +113,8 @@ class ComparisonIn(BaseModel):
     braille: bool = True
     dieline: bool = True
     shade_set_id: str | None = None            # default: the component's effective shade set
+    # for an uploaded reference file only (a library version carries its own): default text for Word, else layout
+    reference_type: Literal["layout", "text"] | None = None
     sample_source: Literal["scan_target", "scan", "spectro", "photo"] = "scan"
 
 
@@ -199,6 +201,11 @@ def create_comparison(call: Call):
                                                "measured with a spectrophotometer."})
     do_text = (b.text and test_kind != "spectro") or review
     k = kind or "leaflet"
+    if artwork_id:
+        ref_type = tx.val("SELECT reference_type FROM artwork_versions WHERE id = %s", artwork_id)
+    else:
+        ref_type = b.reference_type or ("text" if tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid", ref_id) == "docx"
+                                        else "layout")
     settings = {
         "kind": kind or "leaflet", "languages": b.languages,
         "strengths": sorted({x.replace(",", ".") for x in re.findall(r"\d+(?:[.,]\d+)?", strengths)}), "step1": (b.step1 or review) and f["step1_master_audit"],
@@ -207,9 +214,10 @@ def create_comparison(call: Call):
         "ai": {"provider": eng["provider"], "reading_provider": eng["reading_provider"], "review": f["ai_review"],
                "science": f["ai_science"], "read": f["ai_reading"] if b.ai_read is None else (b.ai_read and f["ai_reading"])},
         "text": do_text,
+        "reference_type": ref_type,
         "review_only": review,
         "checks": {"colour": colour_cfg, "barcodes": do_text and b.barcodes and f["check_barcodes"],
-                   "graphics": do_text and b.graphics and f["check_graphics"] and not review,
+                   "graphics": do_text and b.graphics and f["check_graphics"] and not review and ref_type != "text",
                    "text_size": do_text and b.text_size and f["check_text_size"],
                    "braille": do_text and b.braille and f["check_braille"],
                    "dieline": do_text and b.dieline and f["check_dieline"]},
@@ -293,7 +301,7 @@ def get_comparison(call: Call):
         "test": call.tx.one("SELECT id, filename, sha256, page_count, doc_kind, size_bytes FROM files WHERE id = %s", c["test_file_id"]),
     }
     if c["artwork_version_id"]:
-        out["artwork"] = call.tx.one("SELECT id, version, status, effective_from FROM artwork_versions WHERE id = %s",
+        out["artwork"] = call.tx.one("SELECT id, version, status, effective_from, reference_type FROM artwork_versions WHERE id = %s",
                                      c["artwork_version_id"])
     out["result"] = res
     out["decisions"] = {k: {kk: v[kk] for kk in ("decision", "comment", "user_name", "decided_at")} for k, v in current.items()}
@@ -459,6 +467,7 @@ def _meta(call: Call, c: dict, res: dict, lang: str = "en") -> dict:
         "Component": " ".join(x for x in (c.get("product_code"), c.get("component_code")) if x) or "—",
         "Site": c["site_code"], "Reference": c["reference_no"] or "—", "Supplier": c["supplier"] or "—",
         "Purpose": messages.PURPOSE_L.get(lang, messages.PURPOSE_L["en"])[c["purpose"]],
+        "Reference type": messages.REFTYPE_L.get(lang, messages.REFTYPE_L["en"])[(c.get("settings") or {}).get("reference_type") or "layout"],
         "Started by": c["created_by_name"], "Started": _ts(c["created_at"]), "Completed": _ts(c["finished_at"]),
         "Status": messages.STATUS_L.get(lang, messages.STATUS_L["en"]).get(c["status"], c["status"]),
         "Approved file": f"{files['ref']['filename']}  (SHA-256 {files['ref']['sha256'][:16]}…)",

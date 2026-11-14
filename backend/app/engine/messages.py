@@ -182,13 +182,13 @@ L = {
 
 META_KEYS = {
     "fr": {"Audit ID": "N° d'audit", "Company": "Société", "Product": "Produit", "Component": "Article",
-           "Site": "Site", "Reference": "Référence", "Supplier": "Imprimeur", "Purpose": "Nature",
+           "Site": "Site", "Reference": "Référence", "Supplier": "Imprimeur", "Purpose": "Nature", "Reference type": "Type de référence",
            "Started by": "Lancé par", "Started": "Lancé le", "Completed": "Terminé le", "Status": "Statut",
            "Approved file": "Fichier approuvé", "Test file": "Fichier d'essai", "Engine": "Moteur",
            "Result SHA-256": "SHA-256 du résultat", "AI models": "Modèles d'IA", "Levels run": "Niveaux exécutés",
            "AI notes": "Notes de l'IA", "Reading order": "Ordre de lecture", "Printed": "Généré le"},
     "ar": {"Audit ID": "رقم التدقيق", "Company": "الشركة", "Product": "المنتج", "Component": "المادة",
-           "Site": "الموقع", "Reference": "المرجع", "Supplier": "المطبعة", "Purpose": "الغرض",
+           "Site": "الموقع", "Reference": "المرجع", "Supplier": "المطبعة", "Purpose": "الغرض", "Reference type": "نوع المرجع",
            "Started by": "بدأه", "Started": "بدأ في", "Completed": "اكتمل في", "Status": "الحالة",
            "Approved file": "الملف المعتمد", "Test file": "ملف الاختبار", "Engine": "المحرك",
            "Result SHA-256": "SHA-256 للنتيجة", "AI models": "نماذج الذكاء الاصطناعي", "Levels run": "المستويات المنفذة",
@@ -246,6 +246,16 @@ MEANING_L = {
     "en": {"reviewed": "Reviewed", "approved": "Approved", "rejected": "Rejected"},
     "fr": {"reviewed": "Examiné", "approved": "Approuvé", "rejected": "Rejeté"},
     "ar": {"reviewed": "تمت المراجعة", "approved": "معتمد", "rejected": "مرفوض"},
+}
+
+
+REFTYPE_L = {
+    "en": {"layout": "Approved layout (page layout and reading order are compared)",
+           "text": "Approved text (continuous: line wraps and layout order are not deviations)"},
+    "fr": {"layout": "Mise en page approuvée (la mise en page et l'ordre de lecture sont comparés)",
+           "text": "Texte approuvé (continu : retours à la ligne et ordre de mise en page ne sont pas des écarts)"},
+    "ar": {"layout": "تخطيط معتمد (يُقارن تخطيط الصفحة وترتيب القراءة)",
+           "text": "نص معتمد (متصل: فواصل الأسطر وترتيب التخطيط ليست انحرافات)"},
 }
 
 

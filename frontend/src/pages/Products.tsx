@@ -29,6 +29,7 @@ interface Signature { id: number; meaning: string; user_name: string; signed_at:
 interface Version {
   id: string; version: string; status: "draft" | "effective" | "superseded" | "withdrawn"; effective_from: string | null;
   change_control: string | null; authority_ref: string | null; notes: string | null; file_id: string; filename: string;
+  reference_type: "layout" | "text";
   sha256: string; page_count: number | null; doc_kind: string; size_bytes: number; created_at: string; created_by_name: string | null;
   signatures: Signature[];
 }
@@ -246,6 +247,9 @@ function VersionSheet({ component, onClose, onSaved }: { component: ComponentDet
   const [file, setFile] = useState<UploadedFile | null>(null);
   const next = String(component.versions.length + 1).padStart(2, "0");
   const [f, setF] = useState({ version: next, effective_from: "", change_control: "", authority_ref: "", notes: "" });
+  // what the approved file is a reference for; Word defaults to the approved continuous text
+  const [refType, setRefType] = useState<"" | "layout" | "text">("");
+  const refTypeShown = refType || (file?.doc_kind === "docx" ? "text" : "layout");
   const [busy, setBusy] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
   const [general, setGeneral] = useState<string | null>(null);
@@ -253,7 +257,7 @@ function VersionSheet({ component, onClose, onSaved }: { component: ComponentDet
     setBusy(true); setErrs({}); setGeneral(null);
     try {
       onSaved(await post<ComponentDetail>(`/api/components/${component.id}/artwork`, {
-        ...f, effective_from: f.effective_from || null, file_id: file?.id ?? "",
+        ...f, effective_from: f.effective_from || null, file_id: file?.id ?? "", reference_type: refTypeShown,
       }));
       onClose();
     } catch (e) { setErrs(fieldErrors(e)); setGeneral(errorText(e, t)); setBusy(false); }
@@ -263,6 +267,9 @@ function VersionSheet({ component, onClose, onSaved }: { component: ComponentDet
       footer={<><Button onClick={onClose}>{t("common.cancel")}</Button><Button type="submit" variant="primary" busy={busy} disabled={!file}>{t("lib.ver.register")}</Button></>}>
       {general && <Notice tone="danger">{general}</Notice>}
       <FileDrop label={t("lib.ver.file")} value={file} onChange={setFile} error={errs.file_id} hint={t("lib.ver.fileHint")} />
+      <SelectField label={t("ref.type")} value={refTypeShown} onChange={(v) => setRefType(v as "layout" | "text")}
+        error={errs.reference_type} hint={t(`ref.type.${refTypeShown}.hint` as StringKey)}
+        options={(["layout", "text"] as const).map((k) => ({ value: k, label: t(`ref.type.${k}` as StringKey) }))} />
       <div className="grid-2">
         <TextField label={t("lib.ver.version")} value={f.version} dir="ltr" onChange={(v) => setF({ ...f, version: v })} error={errs.version} />
         <TextField label={t("lib.ver.effectiveFrom")} type="date" value={f.effective_from} onChange={(v) => setF({ ...f, effective_from: v })} />
@@ -329,6 +336,7 @@ export function ComponentPage({ componentId }: { componentId: string }) {
                 <div className="v-head">
                   <strong className="mono-id">v{v.version}</strong>
                   <Badge tone={tone[v.status]} dot>{t(`ver.${v.status}` as StringKey)}</Badge>
+                  <Badge title={t(`ref.type.${v.reference_type}.hint` as StringKey)}>{t(`ref.type.${v.reference_type}` as StringKey)}</Badge>
                   {v.effective_from && <span className="small muted">{t("lib.ver.from", { d: date(v.effective_from) })}</span>}
                   <span className="spacer" />
                   <a className="btn sm ghost" href={`/api/files/${v.file_id}/content`}><LuDownload aria-hidden />{t("lib.ver.download")}</a>

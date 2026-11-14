@@ -423,3 +423,125 @@ def test_french_comparison(acme):
     _, data_en = embedded(html_en)
     assert any(f["title"].startswith("Number changed") or f["kind"] != "numeric" for f in data_en["findings"])
     assert data_en["labels"]["info"] == "OCR noise"
+
+
+WORD_SECTIONS = [
+    ("1. What Zentrovan is and what it is used for",
+     "Zentrovan contains zentrolol. It is used to treat high blood pressure in adults."),
+    ("2. What you need to know before you take Zentrovan",
+     "Talk to your doctor about these precautions before you take this medicine."),
+    ("3. How to take Zentrovan",
+     "The recommended dose is 5 mg once daily, taken in the morning with water."),
+    ("4. Possible side effects",
+     "Common side effects are tiredness, dizziness and headache."),
+]
+
+
+def _word(sections) -> bytes:
+    import docx as _docx
+    d = _docx.Document()
+    for h, body in sections:
+        d.add_paragraph(h)
+        d.add_paragraph(body)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
+
+
+def _two_column_design(dose="10 mg") -> bytes:
+    """The leaflet as a designer lays it out: two columns (sections 1 and 3 left, 2 and 4 right), short lines,
+    and 'precautions' hyphenated at a line end. One real change: the dose."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    cols = {
+        56: ["1. What Zentrovan is and what it is used for", "Zentrovan contains zentrolol. It is used",
+             "to treat high blood pressure in adults.", "", "3. How to take Zentrovan",
+             f"The recommended dose is {dose} once", "daily, taken in the morning with water."],
+        310: ["2. What you need to know before you take Zentrovan", "Talk to your doctor about these pre-",
+              "cautions before you take this medicine.", "", "4. Possible side effects",
+              "Common side effects are tiredness,", "dizziness and headache."],
+    }
+    buf = io.BytesIO()
+    cv = canvas.Canvas(buf, pagesize=A4)
+    for x, lines in cols.items():
+        y = 780
+        for t in lines:
+            cv.setFont("Helvetica", 8.5)
+            cv.drawString(x, y, t)
+            y -= 16
+    cv.showPage()
+    cv.save()
+    return buf.getvalue()
+
+
+def _run_ref_type(acme, ref_type):
+    reviewer, _ = acme["reviewer"]
+    st, rf, = reviewer.upload("/api/files", "approved text.docx", _word(WORD_SECTIONS))
+    assert st == 200, rf
+    st, tf, = reviewer.upload("/api/files", f"design two columns {ref_type}.pdf", _two_column_design())
+    assert st == 200, tf
+    body = {"site_id": acme["site"]["id"], "title": f"Word reference · {ref_type}", "reference_file_id": rf["id"],
+            "test_file_id": tf["id"], "languages": ["eng"], "kind": "leaflet", "step1": False}
+    if ref_type:
+        body["reference_type"] = ref_type
+    st, c, _ = reviewer.post("/api/comparisons", body)
+    assert st == 200, c
+    s = _wait(reviewer, c["id"])
+    assert s["status"] == "review", s
+    st, d, _ = reviewer.get(f"/api/comparisons/{c['id']}")
+    return d
+
+
+def test_word_reference_continuous_text(acme):
+    """A Word reference defaults to continuous text: hyphenation at a line end and sections placed in another
+    column are not deviations, the real change is, and every finding shows the approved Word page."""
+    d = _run_ref_type(acme, None)
+    assert d["settings"]["reference_type"] == "text"
+    res = d["result"]
+    real = [f for f in res["findings"] if f["severity"] != "info" and f["step"] in (2, 3)]
+    assert len(real) == 1 and real[0]["kind"] == "numeric", [(f["kind"], f["ref_text"], f["des_text"]) for f in real]
+    assert "5" in real[0]["ref_text"] and "10" in real[0]["des_text"]
+    # the approved side has a place on the rendered Word page, so the report can show it
+    assert real[0]["ref_loc"] and real[0]["ref_crop"], real[0]
+    o = res["reading_order"]["eng"]
+    assert o["hyphen_joins"] >= 1 and o["sections_followed"] is True, o
+
+    # the same files compared as a laid-out reference: the layout differences are reported
+    d2 = _run_ref_type(acme, "layout")
+    assert d2["settings"]["reference_type"] == "layout"
+    real2 = [f for f in d2["result"]["findings"] if f["severity"] != "info" and f["step"] in (2, 3)]
+    assert len(real2) > 1, [(f["kind"], f["ref_text"], f["des_text"]) for f in real2]
+
+
+def test_artwork_reference_type_fixed(acme, db_url):
+    """The reference type is chosen when a version is registered (Word: text by default), shown in the signature,
+    and cannot be changed afterwards."""
+    import psycopg as _pg
+    editor, _ = acme["editor"]
+    approver, apw = acme["approver"]
+    st, p, _ = editor.post("/api/products", {"code": "RTP", "name": "RefType"})
+    st, comp, _ = editor.post(f"/api/products/{p['id']}/components",
+                              {"code": "RTP-PIL", "kind": "leaflet", "name": "Leaflet", "languages": ["en"]})
+    st, wf, = editor.upload("/api/files", "approved.docx", _word(WORD_SECTIONS))
+    st, c, _ = editor.post(f"/api/components/{comp['id']}/artwork", {"version": "01", "file_id": wf["id"]})
+    assert st == 200, c
+    st, pf, = editor.upload("/api/files", "approved.pdf", _pdf(["1. What RefType is", "Text."]))
+    st, c, _ = editor.post(f"/api/components/{comp['id']}/artwork", {"version": "02", "file_id": pf["id"]})
+    st, c, _ = editor.post(f"/api/components/{comp['id']}/artwork",
+                           {"version": "03", "file_id": pf["id"], "reference_type": "text"})
+    vs = {v["version"]: v for v in c["versions"]}
+    assert (vs["01"]["reference_type"], vs["02"]["reference_type"], vs["03"]["reference_type"]) == ("text", "layout", "text")
+    st, c, _ = approver.post(f"/api/artwork/{vs['01']['id']}/sign",
+                             {"meaning": "approved_master", "email": "approver@cmpr.test", "password": apw})
+    assert st == 200, c
+    conn = _pg.connect(db_url, autocommit=True)
+    try:
+        lbl = conn.execute("SELECT record_label FROM signatures WHERE record_id = %s", (vs["01"]["id"],)).fetchone()[0]
+        assert lbl.endswith("approved text"), lbl
+        try:
+            conn.execute("UPDATE artwork_versions SET reference_type = 'layout' WHERE id = %s", (vs["01"]["id"],))
+            raise AssertionError("the reference type of a registered version was changed")
+        except _pg.Error as e:
+            assert "cannot be changed" in str(e), e
+    finally:
+        conn.close()

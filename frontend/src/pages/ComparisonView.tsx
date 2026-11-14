@@ -65,9 +65,10 @@ interface Result {
   exclusions: { doc: string; page: number; reason: string; text: string }[];
   approved: { name: string; pages: number; sizes: [number, number][] }; design: { name: string; pages: number; sizes: [number, number][] };
   ai: { vision_model: string | null; science_model: string | null; reading_model: string | null; notes: string[] };
-  reading_order: Record<string, { similarity: number; approved_words: number; design_words: number }>;
+  reading_order: Record<string, { similarity: number; approved_words: number; design_words: number;
+    hyphen_joins?: number; sections_followed?: boolean; moved_blocks?: number }>;
   screenshots: Record<string, string>; seconds: number;
-  settings?: { text?: boolean };
+  settings?: { text?: boolean; reference_type?: "layout" | "text" };
   review_only?: boolean;
   checks?: { colour?: ColourRes; barcodes?: BarcodeRes; graphics?: { differences: number; notes: string[] }; print?: PrintRes };
 }
@@ -420,6 +421,8 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
             {d.product_name && <span>{d.product_code} · {d.product_name}</span>}
             {d.component_kind && <span>{t(`kind.${d.component_kind}` as StringKey)}</span>}
             <span>{t(`purpose.${d.purpose}` as StringKey)}</span>
+            {d.result?.settings?.reference_type && !d.result.review_only &&
+              <span title={t(`ref.type.${d.result.settings.reference_type}.hint` as StringKey)}>{t(`ref.type.${d.result.settings.reference_type}` as StringKey)}</span>}
             {d.supplier && <span>{d.supplier}</span>}
             {d.reference_no && <span>{d.reference_no}</span>}
           </div>
@@ -509,6 +512,11 @@ function Report({ d, setD }: { d: Detail; setD: (d: Detail) => void }) {
             {step === 4 && res.checks?.colour && <ColourPanel c={res.checks.colour} />}
             {step === 5 && res.checks?.barcodes && <BarcodePanel b={res.checks.barcodes} />}
             {step === 6 && res.checks?.graphics?.notes?.length ? <Notice tone="warn">{res.checks.graphics.notes.join(" ")}</Notice> : null}
+            {(step === 2 || step === 3) && res.settings?.reference_type === "text" && (() => {
+              const o = Object.values(res.reading_order ?? {});
+              const j = o.reduce((a, x) => a + (x.hyphen_joins ?? 0), 0), m = o.reduce((a, x) => a + (x.moved_blocks ?? 0), 0);
+              return <Notice>{t("ref.textNote", { j, m })}{o.some((x) => x.sections_followed) ? " " + t("ref.textNoteSections") : ""}</Notice>;
+            })()}
             {step === 7 && res.checks?.print && <PrintPanel p={res.checks.print} />}
             <div className="rep-tools">
               <input id="rep-q" className="input grow" type="search" placeholder={t("rep.search")} aria-label={t("rep.search")} value={q} onChange={(e) => setQ(e.target.value)} />

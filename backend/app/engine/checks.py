@@ -196,6 +196,15 @@ def to_reference(findings: list) -> list:
     return findings
 
 
+def to_test(findings: list) -> list:
+    """The inverse of to_reference: a single-file check run on the test file shows its locations on the test side."""
+    for f in findings:
+        if f.ref_loc and not f.des_loc:
+            f.des_loc, f.ref_loc = f.ref_loc, []
+            f.des_text, f.ref_text = f.ref_text or f.des_text, ""
+    return findings
+
+
 def barcode_single(ref, product: dict, n: int, progress):
     """Approved material on its own: every barcode must decode with valid data and the product's GTIN."""
     from . import barcodes

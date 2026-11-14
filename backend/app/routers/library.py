@@ -271,6 +271,7 @@ def list_components(call: Call):
     return {"items": call.tx.q(
         "SELECT c.id, c.code, c.kind, c.name, c.languages, p.id AS product_id, p.code AS product_code, p.name AS product_name,"
         "       a.id AS artwork_id, a.version AS artwork_version, a.file_id AS artwork_file_id, f.filename AS artwork_filename,"
+        "       a.reference_type AS artwork_reference_type,"
         "       sh.id AS shade_set_id, sh.version AS shade_version, sh.source AS shade_source"
         "  FROM components c JOIN products p ON p.id = c.product_id"
         "  LEFT JOIN artwork_versions a ON a.component_id = c.id AND a.status = 'effective'"
@@ -287,6 +288,8 @@ class ArtworkIn(BaseModel):
     change_control: str | None = Field(default=None, max_length=80)
     authority_ref: str | None = Field(default=None, max_length=120)
     notes: str | None = Field(default=None, max_length=1000)
+    # layout: the laid-out artwork; text: the approved continuous text. Default: text for Word, layout otherwise.
+    reference_type: Literal["layout", "text"] | None = None
 
 
 @endpoint(auth="tenant_user", body=ArtworkIn)
@@ -299,10 +302,12 @@ def create_artwork(call: Call):
         raise ApiError(422, "invalid", "Some fields need attention.", fields={"file_id": "Upload the approved artwork file."})
     if call.tx.val("SELECT 1 FROM artwork_versions WHERE component_id = %s::uuid AND version = %s", cid, b.version):
         raise ApiError(409, "duplicate", "Some fields need attention.", fields={"version": "This version already exists."})
+    ref_type = b.reference_type or ("text" if call.tx.val("SELECT doc_kind FROM files WHERE id = %s::uuid",
+                                                           b.file_id) == "docx" else "layout")
     call.tx.x("INSERT INTO artwork_versions (tenant_id, component_id, version, file_id, effective_from, change_control,"
-              " authority_ref, notes) VALUES (%s, %s::uuid, %s, %s::uuid, %s::date, %s, %s, %s)",
+              " authority_ref, notes, reference_type) VALUES (%s, %s::uuid, %s, %s::uuid, %s::date, %s, %s, %s, %s)",
               call.tenant_id, cid, b.version, b.file_id, b.effective_from, _opt(b.change_control),
-              _opt(b.authority_ref), _opt(b.notes))
+              _opt(b.authority_ref), _opt(b.notes), ref_type)
     return _component(call, cid)
 
 
@@ -321,7 +326,7 @@ def sign_artwork(call: Call):
     if not a:
         raise not_found("Artwork version")
     comp = call.tx.one("SELECT code FROM components WHERE id = %s", a["component_id"])
-    label = f"{comp['code']} v{a['version']}"
+    label = f"{comp['code']} v{a['version']} · " + ("approved text" if a["reference_type"] == "text" else "approved layout")
     if b.meaning == "approved_master" and a["status"] != "draft":
         raise ApiError(409, "not_draft", "Only a draft version can be approved as the master.")
     if b.meaning == "withdrawn":

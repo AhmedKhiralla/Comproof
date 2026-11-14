@@ -224,9 +224,12 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
 
     # ---- Levels 2 and 3, per language
     order = {}
+    text_ref = settings.get("reference_type") == "text"
+    ref_has_pages = any(p.words for p in ref.pages)
     for lang in [l for l in ("eng", "fra", "ara") if l in languages and do_text and not review_only]:
         label = compare.LANG_LABELS[lang]
-        if ref.plain_text is not None:
+        if ref.plain_text is not None and not ref_has_pages:
+            # Word without a page rendering (LibreOffice unavailable): text only, so no approved-side screenshot
             lines = [l for l in ref.plain_text.splitlines() if compare.is_arabic(l) == (lang == "ara")]
             if lang != "ara" and "+" in latin:      # a docx master carrying both English and French
                 lines = [l for l in lines if not l.strip() or layout.latin_lang_of(l) == lang]
@@ -240,8 +243,17 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
             ratio, a, b, ro, do = best
         order[lang] = {"approved": ro, "design": do, "similarity": round(ratio, 3),
                        "approved_words": len(a), "design_words": len(b)}
+        if text_ref:
+            # the approved reference is continuous text: line wraps and the layout order are not deviations
+            a, ja = compare.dehyphenate(a, {t.norm for t in b})
+            b, jb = compare.dehyphenate(b, {t.norm for t in a})
+            b, reordered = compare.follow_sections(a, b)
+            order[lang].update(hyphen_joins=ja + jb, sections_followed=reordered)
         progress(f"Level 2: comparing {label} text")
         content, spacing = compare.diff(a, b, lang, start_id=len(findings) + 1)
+        if text_ref:
+            content, moved = compare.drop_moved(content, lang)
+            order[lang]["moved_blocks"] = moved
         findings += content
         if settings.get("step3", True):
             progress(f"Level 3: punctuation and typography ({label})")
@@ -250,7 +262,7 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
         check()
 
     # ---- second look at OCR text: re-read each flagged spot at higher resolution
-    exact = ref.kind == "pdf-vector" and des.kind == "pdf-vector"
+    exact = all(d.kind in ("pdf-vector", "docx") and any(p.words for p in d.pages) for d in (ref, des))
     if not exact and not read_p:
         progress("Re-reading flagged spots to remove OCR noise")
         for f in findings:
@@ -298,10 +310,19 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
             guarded("print", lambda: (lambda r: (extra.to_reference(r[0]), {}, r[1], r[2]))(
                 extra.print_check(ref, ref_regions, ref_path, settings, n, progress)))
     elif des.pages:
-        if chk.get("barcodes"):
+        if chk.get("barcodes") and text_ref:
+            # the approved text carries no barcodes: validate the test file's codes on their own (data, GTIN)
+            def _on_test(r):
+                sec = dict(r[1], against="product", test=r[1].get("approved", 0), approved=0)
+                sec["rows"] = [dict(row, test=row.get("approved"), approved=None) for row in sec.get("rows", [])]
+                return extra.to_test(r[0]), {}, sec, r[2]
+            guarded("barcodes", lambda: _on_test(extra.barcode_single(des, settings.get("product") or {}, n, progress)))
+        elif chk.get("barcodes"):
             guarded("barcodes", lambda: (lambda r: (r[0], {}, r[1], r[2]))(
                 extra.barcode_check(ref, des, settings.get("product") or {}, n, progress)))
-        if chk.get("graphics"):
+        if chk.get("graphics") and text_ref:
+            sections["graphics"] = {"skipped": "reference_text"}
+        elif chk.get("graphics"):
             guarded("graphics", lambda: extra.graphics_check(ref, des, ref_regions, des_regions, n, progress))
         if chk.get("text_size") or chk.get("braille") or chk.get("dieline"):
             guarded("print", lambda: (lambda r: (r[0], {}, r[1], r[2]))(

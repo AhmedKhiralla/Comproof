@@ -241,6 +241,97 @@ def tokens_from_text(text: str, lang: str) -> list[Token]:
     return toks
 
 
+# ---------------------------------------------------------------- reference = continuous approved text
+# When the approved reference is the approved TEXT (typically a Word file) rather than the laid-out artwork,
+# where lines wrap and how the designer distributes sections over columns, panels and pages are not deviations.
+
+HYPHENS = ("-", "\u00ad", "\u2010", "\u2011")
+
+
+def dehyphenate(tokens: list[Token], other: set[str]) -> tuple[list[Token], int]:
+    """Join a word split at a line end ("pre-" + "cautions" = "precautions"). A compound split at its own hyphen
+    ("film-" + "coated") keeps the hyphen when the other document writes it that way. Returns (tokens, joins)."""
+    out, joins, i = [], 0, 0
+    while i < len(tokens):
+        t = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        raw = BIDI.sub("", t.raw).rstrip()
+        if (nxt is not None and t.page >= 0 and len(raw) > 1 and raw[-1] in HYPHENS
+                and nxt.line_box is not t.line_box and nxt.box is not t.box
+                and nxt.raw[:1].isalpha() and nxt.raw[:1].islower()
+                and (i + 2 >= len(tokens) or tokens[i + 2].box is not nxt.box)):
+            plain, hyph = t.norm + nxt.norm, f"{t.norm}-{nxt.norm}"
+            keep = hyph in other and plain not in other
+            out.append(Token(raw[:-1] + ("-" if keep else "") + BIDI.sub("", nxt.raw), hyph if keep else plain,
+                             t.page, t.box, min(t.conf, nxt.conf), t.line_box, t.section, t.col, t.ncols))
+            joins += 1
+            i += 2
+            continue
+        out.append(t)
+        i += 1
+    return out, joins
+
+
+def _sec_key(section: str) -> str:
+    return re.sub(r"\s+", " ", section or "").strip().lower()
+
+
+def follow_sections(ref_tokens: list[Token], des_tokens: list[Token]) -> tuple[list[Token], bool]:
+    """Read the design in the approved text's section order: a section the designer placed in another column,
+    panel or page is compared where the approved text has it. Returns (design tokens, reordered)."""
+    ref_order: list[str] = []
+    for t in ref_tokens:
+        k = _sec_key(t.section)
+        if k not in ref_order:
+            ref_order.append(k)
+    if len([k for k in ref_order if k]) < 2:
+        return des_tokens, False
+    runs: list[tuple[str, list[Token]]] = []
+    for t in des_tokens:
+        k = _sec_key(t.section)
+        if runs and runs[-1][0] == k:
+            runs[-1][1].append(t)
+        else:
+            runs.append((k, [t]))
+    known = set(ref_order)
+    lead: list[Token] = []                 # unknown text before any known section stays first
+    by_key: dict[str, list[Token]] = {}
+    last = None
+    for k, toks in runs:
+        if k in known:
+            by_key.setdefault(k, []).extend(toks)
+            last = k
+        elif last is None:
+            lead.extend(toks)
+        else:
+            by_key.setdefault(last, []).extend(toks)      # text the approved file lacks stays with its neighbour
+    out = list(lead)
+    for k in ref_order:
+        out.extend(by_key.get(k, []))
+    return out, [id(t) for t in out] != [id(t) for t in des_tokens]
+
+
+def _norm_text(s: str, lang: str) -> str:
+    return " ".join(n for w in s.split() for n in norm_word(w, lang))
+
+
+def drop_moved(findings: list["Finding"], lang: str, min_words: int = 3) -> tuple[list["Finding"], int]:
+    """A block 'missing' in one place and 'added' unchanged in another was only moved by the layout."""
+    miss = [f for f in findings if f.kind == "missing"]
+    add = [f for f in findings if f.kind == "added"]
+    gone, moved = set(), 0
+    for m in miss:
+        mt = _norm_text(m.ref_text, lang)
+        if len(mt.split()) < min_words:
+            continue
+        for a in add:
+            if a.id not in gone and _norm_text(a.des_text, lang) == mt:
+                gone.update((m.id, a.id))
+                moved += 1
+                break
+    return [f for f in findings if f.id not in gone], moved
+
+
 def is_arabic(s: str) -> bool:
     return any("؀" <= c <= "ۿ" for c in s)
 
@@ -280,6 +371,13 @@ SIG_NUM = re.compile(r"(\d+(?:[.,]\d+)?\s*/\s*\d+(?:[.,]\d+)*"          # fracti
                      r"|\d{2,}"                                          # multi-digit 10, 30
                      r"|\d+(?=\s*(?:mg|g\b|ml|%|°|µg|mcg|week|day|hour|h\b|time|year|month|"
                      r"مجم|ملغ|جم|مل|اسبوع|أسبوع|يوم|ساع|مرة|سنة|شهر|درج)))", re.I)
+
+
+def _all_numbers(s: str) -> list[str]:
+    """Every number in a quote, in reading order, for describing a change (single digits included)."""
+    s = fix_ar_digits(BIDI.sub("", unicodedata.normalize("NFKC", s))).translate(AR_INDIC).replace("٫", ".")
+    s = re.sub(r"(\d),(\d{1,2})(?!\d)", r"\1.\2", s)
+    return re.findall(r"\d+(?:\.\d+)?", s)
 
 
 def _numbers(s: str) -> list[str]:
@@ -477,7 +575,7 @@ def build_detail(f: "Finding", ref_tokens, des_tokens, i1, i2, j1, j2):
     elif f.kind == "added":
         f.explanation = f"The design adds {q(added or f.des_text)}, which is not in the approved leaflet."
     elif f.kind == "numeric":
-        rn, dn = _numbers(f.ref_text), _numbers(f.des_text)
+        rn, dn = _all_numbers(removed or f.ref_text), _all_numbers(added or f.des_text)
         f.explanation = (f"Approved reads {q(removed or f.ref_text)}, design reads {q(added or f.des_text)}. "
                          f"Numbers: approved {', '.join(rn) or 'none'} → design {', '.join(dn) or 'none'}.")
     elif f.kind == "ocr":
@@ -489,7 +587,8 @@ def build_detail(f: "Finding", ref_tokens, des_tokens, i1, i2, j1, j2):
         trim = lambda x: x[:160] + ("…" if len(x) > 160 else "")
         f.key = f"txt.{f.kind}"
         f.params = {"ref": trim(removed or f.ref_text), "des": trim(added or f.des_text),
-                    "rn": ", ".join(_numbers(f.ref_text)) or "none", "dn": ", ".join(_numbers(f.des_text)) or "none",
+                    "rn": ", ".join(_all_numbers(removed or f.ref_text)) or "none",
+                    "dn": ", ".join(_all_numbers(added or f.des_text)) or "none",
                     "cat": CATEGORY_KEYS.get(f.category, "")}
     if f.kind != "ocr":
         f.explanation += " " + IMPACT.get(f.category, "")

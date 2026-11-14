@@ -93,7 +93,7 @@ export function Comparisons() {
 
 interface ComponentPick {
   id: string; code: string; kind: string; name: string; languages: string[]; product_code: string; product_name: string;
-  artwork_id: string | null; artwork_version: string | null; artwork_filename: string | null;
+  artwork_id: string | null; artwork_version: string | null; artwork_filename: string | null; artwork_reference_type?: "layout" | "text" | null;
   shade_set_id: string | null; shade_version: string | null; shade_source: string | null;
 }
 const CHECKS = ["colour", "barcodes", "graphics", "text_size", "braille", "dieline"] as const;
@@ -126,6 +126,8 @@ export function NewComparison() {
       title: s.title || `${comp.product_name} · ${comp.name}`, mirror: comp.kind === "blister_foil" ? s.mirror : false }));
   }, [comp]);
   const useMaster = !!comp?.artwork_id && !customRef;
+  const [refType, setRefType] = useState<"" | "layout" | "text">("");
+  const refTypeShown = useMaster ? (comp?.artwork_reference_type || "layout") : (refType || (ref?.doc_kind === "docx" ? "text" : "layout"));
   const review = f.purpose === "master_review";
   const spectroTest = test?.doc_kind === "spectro";
   const textOn = (f.text && !spectroTest) || review;
@@ -134,7 +136,7 @@ export function NewComparison() {
     try {
       const r = await post<{ id: string }>("/api/comparisons", {
         site_id: f.site_id, title: f.title, purpose: f.purpose, component_id: f.component_id || null,
-        reference_file_id: useMaster ? null : ref?.id ?? null, test_file_id: review ? null : test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
+        reference_file_id: useMaster ? null : ref?.id ?? null, reference_type: useMaster ? null : refTypeShown, test_file_id: review ? null : test?.id ?? "", supplier: f.supplier || null, reference_no: f.reference_no || null,
         kind: f.kind || null, languages: [f.eng && "eng", f.fra && "fra", f.ara && "ara"].filter(Boolean), step1: f.step1, step3: f.step3,
         mirror_test: f.mirror, rotated_text: f.rotated || null, ai_read: f.aiRead, text: textOn,
         ...checks, sample_source: spectroTest ? "spectro" : f.sample_source,
@@ -180,12 +182,15 @@ export function NewComparison() {
                   <span className="label-like">{t("new.reference")}</span>
                   <div className="file-chip master">
                     <span className="grow"><strong>{comp!.artwork_filename}</strong>
-                      <span className="small muted">{t("new.masterUsed", { v: comp!.artwork_version ?? "" })}</span></span>
+                      <span className="small muted">{t("new.masterUsed", { v: comp!.artwork_version ?? "" })} · {t(`ref.type.${refTypeShown}` as StringKey)}</span></span>
                   </div>
-                  <div className="hint">{t("new.masterHint")}</div>
+                  <div className="hint">{t("new.masterHint")} {t(`ref.type.${refTypeShown}.hint` as StringKey)}</div>
                 </div>
               ) : null}
               {!useMaster && <FileDrop label={t("new.reference")} hint={t("new.referenceHint")} value={ref} onChange={setRef} error={errs.reference_file_id} />}
+              {!useMaster && ref && !review && <SelectField label={t("ref.type")} value={refTypeShown} onChange={(v) => setRefType(v as "layout" | "text")}
+                hint={t(`ref.type.${refTypeShown}.hint` as StringKey)}
+                options={(["layout", "text"] as const).map((k) => ({ value: k, label: t(`ref.type.${k}` as StringKey) }))} />}
               {comp?.artwork_id && <button type="button" className="link-btn small" onClick={() => { setCustomRef(!customRef); setRef(null); }}>
                 {customRef ? t("new.useMaster") : t("new.otherReference")}</button>}
             </div>

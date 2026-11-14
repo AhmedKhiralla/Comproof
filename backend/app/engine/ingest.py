@@ -102,8 +102,10 @@ def _docx(path: str) -> Document:
     soffice = _which("soffice") or _which("libreoffice")
     if soffice:
         with tempfile.TemporaryDirectory() as tmp:
-            subprocess.run([soffice, "--headless", "--convert-to", "pdf", "--outdir", tmp, path],
-                           check=False, capture_output=True, timeout=180)
+            # own profile per conversion: two conversions at once (or an unwritable HOME) must not collide
+            profile = "file://" + os.path.join(tmp, "lo-profile")
+            subprocess.run([soffice, f"-env:UserInstallation={profile}", "--headless", "--convert-to", "pdf",
+                            "--outdir", tmp, path], check=False, capture_output=True, timeout=180)
             pdfs = [f for f in os.listdir(tmp) if f.endswith(".pdf")]
             if pdfs:
                 rendered = _pdf_pages(os.path.join(tmp, pdfs[0]))
