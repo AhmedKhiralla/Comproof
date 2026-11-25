@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   LuBuilding2, LuChevronDown, LuFilePlus2, LuFileSearch, LuHouse, LuKeyRound, LuLanguages, LuLibrary, LuLogOut,
-  LuMapPin, LuMenu, LuMonitor, LuMoon, LuScrollText, LuSettings, LuSun, LuUsers, LuX,
+  LuMapPin, LuMenu, LuMonitor, LuMoon, LuPanelLeftClose, LuPanelLeftOpen, LuScrollText, LuSettings, LuSun, LuUsers, LuX,
 } from "react-icons/lu";
 import { useI18n } from "../lib/i18n";
 import { Link, navigate, usePath } from "../lib/router";
@@ -45,6 +45,12 @@ function groupsFor(isPlatform: boolean, isAdmin: boolean): NavGroup[] {
   return groups;
 }
 
+const COLLAPSE_KEY = "comproof.navCollapsed";
+
+function readCollapsed(): boolean {
+  try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
+}
+
 function isCurrent(path: string, to: string) {
   if (to === "/comparisons" && path === "/comparisons/new") return false;
   return to === "/" ? path === "/" : path === to || path.startsWith(to + "/");
@@ -57,16 +63,23 @@ export function Shell({ children }: { children: ReactNode }) {
   const path = usePath();
   const [navOpen, setNavOpen] = useState(false);
   useEffect(() => { setNavOpen(false); }, [path]);
+  // desktop only: the side menu shrinks to icons; remembered on this browser
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  const toggleCollapsed = () => setCollapsed((c) => {
+    try { localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1"); } catch { /* storage unavailable */ }
+    return !c;
+  });
   if (!me) return null;
   const u = me.user;
   const groups = groupsFor(u.is_platform_admin, u.is_tenant_admin);
   const roleLabel = u.is_platform_admin ? t("user.platformAdmin") : u.is_tenant_admin ? t("user.companyAdmin") : me.tenant?.name ?? "";
 
   return (
-    <div className={`shell ${navOpen ? "nav-open" : ""}`}>
+    <div className={`shell ${navOpen ? "nav-open" : ""} ${collapsed ? "nav-collapsed" : ""}`}>
       <aside className="sidebar" aria-label={t("app.name")}>
         <div className="brand-block">
-          <Logo height={30} />
+          <span className="logo-full"><Logo height={30} /></span>
+          <img className="logo-mark" src="/brand/mark.png" alt="Comp11 Labs" height={28} />
           <div className="product"><strong>Comproof</strong><span>{u.is_platform_admin ? t("shell.platformScope") : me.tenant?.name}</span></div>
         </div>
         <nav className="nav">
@@ -74,7 +87,8 @@ export function Shell({ children }: { children: ReactNode }) {
             <div className="nav-group" key={i}>
               {g.title && <div className="nav-group-title">{t(g.title)}</div>}
               {g.items.map((item) => item.to ? (
-                <Link key={item.label} to={item.to} className="nav-item" aria-current={isCurrent(path, item.to) ? "page" : undefined}>
+                <Link key={item.label} to={item.to} className="nav-item" aria-current={isCurrent(path, item.to) ? "page" : undefined}
+                  title={collapsed ? t(item.label) : undefined}>
                   {item.icon}<span className="label">{t(item.label)}</span>
                 </Link>
               ) : (
@@ -85,7 +99,13 @@ export function Shell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-        <div className="sidebar-foot">{t("shell.version", { v: "1.4.0" })} · Comp11 Labs</div>
+        <div className="sidebar-foot">
+          <button type="button" className="nav-item nav-toggle" onClick={toggleCollapsed} aria-expanded={!collapsed}
+            title={collapsed ? t("nav.expand") : t("nav.collapse")} aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}>
+            {collapsed ? <LuPanelLeftOpen /> : <LuPanelLeftClose />}<span className="label">{t("nav.collapse")}</span>
+          </button>
+          <div className="foot-ver">{t("shell.version", { v: "1.4.1" })} · Comp11 Labs</div>
+        </div>
       </aside>
       {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}
 
