@@ -1482,6 +1482,18 @@ ul.plain { margin: 0; padding-inline-start: 18px; }
 .lab-cell { display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
 .ink-table td { vertical-align: middle; }
 .ink-table td.num { font-variant-numeric: tabular-nums; font-weight: 600; }
+.ink-table td.ink-name { min-width: 110px; }
+.ink-table td.ink-check { white-space: nowrap; }
+.ink-table tr.has-note td { border-bottom: 0; padding-bottom: 4px; }
+.ink-table tr.ink-note td { padding-top: 0; font-size: 12.5px; color: var(--text-2); }
+/* stay inside the visible part of the panel even when the table scrolls sideways */
+.ink-table tr.ink-note .note-wrap { position: sticky; inset-inline-start: 14px; display: block; max-width: min(720px, calc(100vw - 108px)); white-space: normal; }
+@media (max-width: 700px) {
+  .ink-table th, .ink-table td { padding-inline: 8px; }
+  .ink-table .lab-cell { flex-direction: column; align-items: flex-start; gap: 4px; }
+  .ink-table .lab-cell .mono-id { font-size: 11px; }
+  .ink-table td.ink-name { min-width: 84px; }
+}
 .shade-previews { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
 .shade-previews figure { margin: 0; }
 .shade-previews img { display: block; width: 100%; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--paper); }

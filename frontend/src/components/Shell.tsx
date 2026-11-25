@@ -104,7 +104,7 @@ export function Shell({ children }: { children: ReactNode }) {
             title={collapsed ? t("nav.expand") : t("nav.collapse")} aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}>
             {collapsed ? <LuPanelLeftOpen /> : <LuPanelLeftClose />}<span className="label">{t("nav.collapse")}</span>
           </button>
-          <div className="foot-ver">{t("shell.version", { v: "1.4.1" })} · Comp11 Labs</div>
+          <div className="foot-ver">{t("shell.version", { v: "1.4.2" })} · Comp11 Labs</div>
         </div>
       </aside>
       {navOpen && <div className="scrim" onClick={() => setNavOpen(false)} />}

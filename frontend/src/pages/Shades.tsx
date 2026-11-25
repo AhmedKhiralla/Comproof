@@ -1,5 +1,5 @@
 // Shade standards: the Standard / Light / Dark colour reference of a packaging component.
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { LuPalette, LuPlus, LuShieldCheck, LuUndo2 } from "react-icons/lu";
 import { FileDrop, SignDialog, type Meaning, type UploadedFile } from "../components/cp";
 import { Badge, Button, Empty, Notice, SelectField, Sheet, TextField, errorText, fieldErrors, useToast } from "../components/ui";
@@ -126,14 +126,17 @@ export function ShadeSection({ component, onChanged }: { component: { id: string
                 <thead><tr><th>{t("shade.ink")}</th><th>{t("shade.dark")}</th><th>{t("shade.standard")}</th><th>{t("shade.light")}</th><th>{t("shade.inkStatus")}</th></tr></thead>
                 <tbody>
                   {s.measurement.inks.map((i) => (
-                    <tr key={i.id}>
-                      <td><span className="mono-id subtle">{i.id}</span> {i.name}{i.area_pct != null && <div className="cell-sub">{i.area_pct}% {t("shade.ofArea")}</div>}</td>
-                      {(["dark", "standard", "light"] as const).map((k) => (
-                        <td key={k}><span className="lab-cell"><Swatch lab={i[k]} /><span className="mono-id small">{i[k].L.toFixed(1)} / {i[k].a.toFixed(1)} / {i[k].b.toFixed(1)}</span></span></td>
-                      ))}
-                      <td><Badge tone={i.status === "ok" ? "ok" : i.status === "flat" || i.status === "one_sided" ? undefined : "danger"}>{t(`shade.ink.${i.status}` as StringKey)}</Badge>
-                        <div className="cell-sub">{i.note}</div></td>
-                    </tr>
+                    <Fragment key={i.id}>
+                      <tr className={i.note ? "has-note" : undefined}>
+                        <td className="ink-name"><span className="mono-id subtle">{i.id}</span> {i.name}{i.area_pct != null && <div className="cell-sub">{i.area_pct}% {t("shade.ofArea")}</div>}</td>
+                        {(["dark", "standard", "light"] as const).map((k) => (
+                          <td key={k}><span className="lab-cell"><Swatch lab={i[k]} /><span className="mono-id small">{i[k].L.toFixed(1)} / {i[k].a.toFixed(1)} / {i[k].b.toFixed(1)}</span></span></td>
+                        ))}
+                        <td className="ink-check"><Badge tone={i.status === "ok" ? "ok" : i.status === "flat" || i.status === "one_sided" ? undefined : "danger"}>{t(`shade.ink.${i.status}` as StringKey)}</Badge></td>
+                      </tr>
+                      {/* the explanation gets the full width of the table, so it is readable on a phone */}
+                      {i.note && <tr className="ink-note"><td colSpan={5}><span className="note-wrap">{i.note}</span></td></tr>}
+                    </Fragment>
                   ))}
                 </tbody>
               </table></div>
