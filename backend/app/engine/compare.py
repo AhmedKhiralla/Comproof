@@ -174,6 +174,20 @@ PIL_AR = [
     ("الآثار الجانبية", "PIL 4 · الآثار الجانبية"), ("كيفية تخزين", "PIL 5 · التخزين"),
     ("محتويات العبوة", "PIL 6 · محتويات العبوة"), ("صاحب الترخيص", "PIL 6 · صاحب الترخيص والمصنع"),
 ]
+# A numbered line is an SmPC heading only when its words say so: "2C - 4A" (a hair type) or "7 jours" are not.
+SMPC_WORDS = {
+    "1": ["name", "dénomination", "denomination"], "2": ["composition"], "3": ["form", "forme"],
+    "4": ["clinical", "clinique"], "4.1": ["indication"], "4.2": ["posolog", "administration"],
+    "4.3": ["contra", "contre"], "4.4": ["warning", "mise", "précaution", "precaution"], "4.5": ["interaction"],
+    "4.6": ["fertil", "pregnan", "grossesse"], "4.7": ["driving", "conduite", "machine"],
+    "4.8": ["undesirable", "indésirable", "side effect"], "4.9": ["overdose", "surdosage"],
+    "5": ["pharmacolog"], "5.1": ["pharmacodynam"], "5.2": ["pharmacokinet", "pharmacocinét"],
+    "5.3": ["preclinical", "préclinique", "safety", "sécurité"], "6": ["pharmaceutical", "pharmaceutique"],
+    "6.1": ["excipient"], "6.2": ["incompatib"], "6.3": ["shelf", "durée", "conservation"],
+    "6.4": ["storage", "conservation", "store"], "6.5": ["container", "emballage", "nature", "contents"],
+    "6.6": ["disposal", "élimination", "handling", "manipulation"],
+    "7": ["holder", "licence", "license", "marketing", "titulaire", "autorisation"],
+}
 HEAD_EN = re.compile(r"^\s*(\d(?:\.\d)?)\s*\.?\s*([A-ZÀ-Þ][A-Za-zà-ÿÀ-ÞœŒ&,'’\- ]{3,})")
 
 
@@ -187,7 +201,7 @@ def heading_of(text: str, lang: str) -> str | None:
             if key in low[:55] and len(t.split()) <= 14:
                 return name
         m = HEAD_EN.match(t)
-        if m and m.group(1) in SMPC:
+        if m and m.group(1) in SMPC and any(k in m.group(2).lower() for k in SMPC_WORDS[m.group(1)]):
             return (SMPC_FR if lang == "fra" else SMPC)[m.group(1)]
         return None
     for key, name in PIL_AR:

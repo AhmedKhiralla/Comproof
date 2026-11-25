@@ -161,7 +161,7 @@ def print_check(des, des_regions, des_path: str, settings: dict, n: int, progres
         progress("Level 7: reading Braille")
         product = settings.get("product") or {}
         problems, info = pc.braille_check(des, product.get("name", ""), settings.get("strengths") or [],
-                                          bool(settings.get("braille_required")))
+                                          bool(settings.get("braille_required")), des_regions)
         section["braille"] = {"found": [{k: v for k, v in b.items() if k != "box"} for b in info["found"]],
                               "expected": info["expected"], "required": bool(settings.get("braille_required"))}
         for p in problems:

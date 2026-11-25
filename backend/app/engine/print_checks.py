@@ -197,13 +197,60 @@ def read_braille(dots, dpi: float) -> list[dict]:
     return out
 
 
-def braille_check(doc, expected_name: str, strengths: list[str], required: bool) -> tuple[list[dict], dict]:
-    found = []
+def _text_boxes(regions, page: int) -> list[list[float]]:
+    """Boxes of words that were read confidently as printed text: Braille is never inside printed words."""
+    boxes = []
+    for r in regions or []:
+        if r.page != page:
+            continue
+        for ln in r.lines:
+            for w in ln.words:
+                letters = sum(ch.isalpha() for ch in w.text)
+                if letters >= 2 and (w.conf is None or w.conf >= 45):
+                    boxes.append(w.box)
+    return boxes
+
+
+def _outside_text(dots, boxes, pad: float):
+    if not boxes:
+        return dots
+    b = np.array(boxes, float)
+    keep = []
+    for x, y, s in dots:
+        inside = (b[:, 0] - pad <= x) & (x <= b[:, 2] + pad) & (b[:, 1] - pad <= y) & (y <= b[:, 3] + pad)
+        if not inside.any():
+            keep.append((x, y, s))
+    return keep
+
+
+def _readable(text: str) -> bool:
+    """Decoded Braille that is mostly letters and digits; a pattern of round print (letters, dots of a texture)
+    decodes to punctuation and unknown cells."""
+    t = text.replace(" ", "")
+    if not t:
+        return False
+    good = sum(ch.isalnum() for ch in t)
+    if good / len(t) < 0.85 or "?" in t:
+        return False
+    # isolated round marks decode as "a" (a single dot); real words are not made of one letter
+    return len(set(t)) >= 3 and t.count("a") / len(t) <= 0.5
+
+
+def braille_check(doc, expected_name: str, strengths: list[str], required: bool,
+                  regions=None) -> tuple[list[dict], dict]:
+    found, unclear = [], []
     for p in doc.pages:
         dpi = p.source_dpi if p.source_dpi and p.source_dpi > 72 else 300.0
-        for b in read_braille(find_dots(p.image, dpi), dpi):
-            found.append(dict(b, page=p.index))
-    info = {"found": found, "expected": expected_name}
+        dots = _outside_text(find_dots(p.image, dpi), _text_boxes(regions, p.index), 0.3 * dpi / 25.4)
+        for b in read_braille(dots, dpi):
+            (found if _readable(b["text"]) else unclear).append(dict(b, page=p.index))
+    info = {"found": found, "expected": expected_name, "unclear": len(unclear)}
+    if not found and unclear and required:
+        # dots in a Braille-like grid that do not read as Braille: say so, without claiming a wrong name
+        return [{"severity": "minor", "title": "Braille could not be read",
+                 "detail": "Dots were found but they do not read as Braille text. Check the Braille by touch on the "
+                           "printed item.", "page": unclear[0]["page"], "box": unclear[0]["box"],
+                 "key": "pr.br_unclear", "params": {}}], info
     problems = []
     import unicodedata
     fold = lambda s: unicodedata.normalize("NFKD", s.replace("œ", "oe")).encode("ascii", "ignore").decode()

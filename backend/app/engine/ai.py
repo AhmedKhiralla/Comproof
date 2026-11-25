@@ -209,6 +209,10 @@ Do not trust these readings. Look only at the images:
 1. Find the words in the highlighted area of image 1 and copy them exactly as printed into "approved_reads".
 2. Find the corresponding words in image 2 and copy them exactly as printed into "design_reads".
 3. Compare YOUR two transcriptions, not the engine's. If they say the same thing, the verdict is "ocr_noise".
+4. The two images are crops and may not show the same amount of text. Compare the same passage on both: if a
+   sentence runs past the edge of one image, or you cannot see the whole corresponding text in both images, the
+   verdict is "unclear", never "real_difference". When both images show the same words and only the engine's
+   line order differs (text in two columns side by side, around pictograms), the verdict is "ocr_noise".
 Ignore fonts, bold/italic, colours, line breaks, layout, stamps, signatures and headers/footers.
 Judge wording, numbers, punctuation and spacing only. Do not judge which version is medically better:
 any real change from the approved text is a "real_difference", even a correction.

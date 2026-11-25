@@ -16,6 +16,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
+
 from PIL import Image, ImageDraw, ImageOps
 
 from . import ai, compare, ingest, layout, master_checks
@@ -273,6 +275,15 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
                     f.severity = "info"
         check()
 
+    # ---- word-break findings on scans: measure the gap on both prints before believing the OCR
+    if not exact:
+        for f in findings:
+            if f.kind == "spacing" and f.severity != "info":
+                same = same_word_gaps(ref, des, f)
+                if same:
+                    f.severity, f.note = "info", same
+        check()
+
     # ---- Levels 4-7: colour, barcodes, graphics, print checks
     from . import checks as extra
     chk = settings.get("checks") or {}
@@ -418,6 +429,74 @@ def run(ref_path: str, des_path: str, out_dir: str, settings: dict | None = None
     return result
 
 
+def _empty_runs(img, box) -> tuple[list[tuple[int, int]], int]:
+    """Columns without ink inside a word box: [(start, width)] relative to the box, and the box height."""
+    x0, y0, x1, y1 = (int(v) for v in box)
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return [], max(1, y1 - y0)
+    g = np.asarray(img.convert("L").crop((x0, y0, x1, y1)), float)
+    ink, paper = np.percentile(g, 5), np.percentile(g, 90)
+    if paper - ink < 25:
+        return [], y1 - y0
+    dark = (g < (ink + paper) / 2).sum(0) > 0
+    runs, start = [], None
+    for i, d in enumerate(dark):
+        if not d and start is None:
+            start = i
+        elif d and start is not None:
+            if start > 0:
+                runs.append((start, i - start))
+            start = None
+    return runs, y1 - y0
+
+
+def _gap_near(runs, pos: float, tol: float) -> int:
+    near = [w for s, w in runs if abs(s + w / 2 - pos) <= tol]
+    return max(near, default=0)
+
+
+def same_word_gaps(ref, des, f) -> str | None:
+    """A word-break finding (“Tetramethyl Acetyl…” vs “TetramethylAcetyl…”) on scans: measure the white gap at the
+    break on both prints. When the gap is the same, the print is the same and only the OCR split differs."""
+    sides = [(ref, f.ref_hl), (des, f.des_hl)]
+    if any(not hl for _, hl in sides) or len(f.ref_hl) == len(f.des_hl):
+        return None
+    (sdoc, shl), (mdoc, mhl) = sides if len(f.ref_hl) > len(f.des_hl) else sides[::-1]
+    spage, mpage = shl[0][0], mhl[0][0]
+    if any(p != spage for p, _ in shl) or any(p != mpage for p, _ in mhl) or not (0 <= spage < len(sdoc.pages)) \
+            or not (0 <= mpage < len(mdoc.pages)):
+        return None
+    sb = sorted((b for _, b in shl), key=lambda b: b[0])
+    mb = sorted((b for _, b in mhl), key=lambda b: b[0])
+    # one line on each side (a break across lines is a layout question, not a spacing one)
+    for boxes in (sb, mb):
+        top, bot = max(b[1] for b in boxes), min(b[3] for b in boxes)
+        if bot - top < 0.4 * min(b[3] - b[1] for b in boxes):
+            return None
+    S = [min(b[0] for b in sb), min(b[1] for b in sb), max(b[2] for b in sb), max(b[3] for b in sb)]
+    M = [min(b[0] for b in mb), min(b[1] for b in mb), max(b[2] for b in mb), max(b[3] for b in mb)]
+    sw, mw = S[2] - S[0], M[2] - M[0]
+    if sw <= 0 or mw <= 0 or not (0.75 < mw / sw < 1.33):
+        return None
+    s_runs, sh = _empty_runs(sdoc.pages[spage].image, S)
+    m_runs, mh = _empty_runs(mdoc.pages[mpage].image, M)
+    measured = []
+    for a, b in zip(sb, sb[1:]):
+        at = ((a[2] + b[0]) / 2 - S[0]) / sw                  # where the break is, as a share of the text width
+        gs = _gap_near(s_runs, at * sw, 0.03 * sw + 2)
+        gm = _gap_near(m_runs, at * mw, 0.04 * mw + 2)
+        # gaps relative to the text height, so a slightly different scan scale does not matter
+        rs, rm = gs / max(sh, 1), gm / max(mh, 1)
+        # below about an eighth of the text height a gap is letter spacing, not a word space
+        if not (max(rs, rm) < 0.12 or abs(rs - rm) <= max(0.06, 0.4 * max(rs, rm))):
+            return None
+        measured.append((gs, gm))
+    if not measured:
+        return None
+    g = ", ".join(f"{a} px / {b} px" for a, b in measured)
+    return (f"Same gap on both prints ({g}): the print is the same; the OCR read the word break differently.")
+
+
 def _read_loc(doc, loc, lang, grow=0):
     import pytesseract
     from PIL import ImageOps
@@ -463,6 +542,13 @@ def apply_review(f) -> None:
             a["verdict"] = "unclear"
             a["explanation"] = ("The AI called this a misreading, but its own readings of the two images differ; "
                                 "check it by eye. " + str(a.get("explanation", ""))).strip()
+    elif v == "real_difference" and _cut_off(ra, rd, f.lang):
+        # One reading is the start of the other ("Vaporisez sur cheveux" / "Vaporisez sur cheveux secs ou …"):
+        # the crop of one image ended mid-passage, so the AI compared a fragment with the whole sentence.
+        a["verdict"] = "unclear"
+        a["explanation"] = ("One image shows only part of this passage, so the AI compared a fragment with the whole "
+                            "text; check it by eye. " + str(a.get("explanation", ""))).strip()
+        # severity stays: a real cut at the end of a sentence looks the same, so a person must look
     elif v == "real_difference" and f.kind in ("added", "missing") and _coverage(
             f.des_text if f.kind == "added" else f.ref_text, ra if f.kind == "added" else rd, f.lang) >= 0.6:
         # "Added" text that the AI itself reads on the approved image (or "missing" text it reads on the new one)
@@ -477,6 +563,16 @@ def apply_review(f) -> None:
     elif v == "real_difference" and f.severity == "info":
         f.severity = "minor"     # the engine thought it was noise; a person should look
     f.ai = a
+
+
+def _cut_off(a: str, b: str, lang: str) -> bool:
+    """True when the shorter reading is the beginning (or the end) of the longer one, word for word."""
+    wa = [t for w in (a or "").split() for t in compare.norm_word(w, lang)]
+    wb = [t for w in (b or "").split() for t in compare.norm_word(w, lang)]
+    short, long_ = sorted((wa, wb), key=len)
+    if len(short) < 2 or len(long_) <= len(short):
+        return False
+    return long_[:len(short)] == short or long_[-len(short):] == short
 
 
 def _coverage(flagged: str, other: str, lang: str) -> float:
